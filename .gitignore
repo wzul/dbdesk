@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.env.*
+plugin-data/
+desktop-plugins/
+*.key
+*.sqlite3
+.DS_Store
+node_modules/
