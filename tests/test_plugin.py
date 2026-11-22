@@ -59,10 +59,12 @@ class Base(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         os.environ["HERMES_HOME"] = str(self.home)
+        os.environ["DBDESK_NO_NOTIFY"] = "1"
         (self.home / "plugin-data" / "dbdesk").mkdir(parents=True)
 
     def tearDown(self) -> None:
         os.environ.pop("HERMES_HOME", None)
+        os.environ.pop("DBDESK_NO_NOTIFY", None)
         self._tmp.cleanup()
 
     @staticmethod
