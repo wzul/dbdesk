@@ -31,6 +31,7 @@ import re
 import secrets as pysecrets
 import shutil
 import socket
+import sqlite3
 import subprocess
 import time
 import urllib.error
@@ -62,7 +63,7 @@ MYSQL = shutil.which("mysql") or shutil.which("mariadb") or "/usr/bin/mysql"
 NULL_SENTINEL = "\u2400"
 QUERY_TIMEOUT = 30
 MAX_ROWS = 1000
-KINDS = {"postgres", "mysql", "clickhouse", "mcp", "http"}
+KINDS = {"postgres", "mysql", "clickhouse", "mcp", "http", "sqlite"}
 _SSH_TUNNELS: dict[str, dict[str, Any]] = {}
 
 
@@ -306,7 +307,7 @@ def _command_tunnel(conn: dict[str, Any]) -> None:
 
 def _connect(conn_id: str) -> dict[str, Any]:
     conn = _get(conn_id)
-    if str(conn.get("kind") or "") in ("mcp", "http"):
+    if str(conn.get("kind") or "") in ("mcp", "http", "sqlite"):
         return conn
     if str(conn.get("tunnel_command") or "").strip():
         _command_tunnel(conn)
@@ -319,6 +320,8 @@ def _connect(conn_id: str) -> dict[str, Any]:
 
 
 def _with_db(conn: dict[str, Any], database: str | None) -> dict[str, Any]:
+    if str(conn.get("kind") or "") == "sqlite":
+        return conn
     if database:
         return dict(conn, dbname=str(database))
     return conn
@@ -513,8 +516,12 @@ def _like_escape(value: Any) -> str:
 def _where_clause(kind: str, filters: Any) -> str:
     if not isinstance(filters, list):
         return ""
-    quote = {"postgres": _ident, "mysql": _my_ident, "clickhouse": _ch_ident}[kind]
-    literal = {"postgres": _lit, "mysql": _my_lit, "clickhouse": _ch_lit}[kind]
+    quote = {
+        "postgres": _ident, "mysql": _my_ident, "clickhouse": _ch_ident, "sqlite": _sqlite_ident
+    }[kind]
+    literal = {
+        "postgres": _lit, "mysql": _my_lit, "clickhouse": _ch_lit, "sqlite": _sqlite_lit
+    }[kind]
     clauses: list[str] = []
     for item in filters[:8]:
         if not isinstance(item, dict):
@@ -536,7 +543,17 @@ def _where_clause(kind: str, filters: Any) -> str:
                 pattern = "%" + pattern + "%"
             else:
                 pattern = pattern + "%"
-            if kind == "postgres":
+            if kind == "sqlite":
+                cast = f"CAST({target} AS TEXT)"
+                if op == "contains":
+                    left = f"lower({cast})" if insensitive else cast
+                    right = f"lower({literal(value)})" if insensitive else literal(value)
+                    clauses.append(f"instr({left}, {right}) > 0")
+                else:
+                    left = f"lower(substr({cast}, 1, length({literal(value)})))" if insensitive else f"substr({cast}, 1, length({literal(value)}))"
+                    right = f"lower({literal(value)})" if insensitive else literal(value)
+                    clauses.append(f"{left} = {right}")
+            elif kind == "postgres":
                 operator = "ILIKE" if insensitive else "LIKE"
                 clauses.append(f"{target}::text {operator} {literal(pattern)}")
             elif kind == "mysql":
@@ -708,6 +725,8 @@ def _ddl(conn: dict[str, Any], schema: str, table: str) -> str:
         return _mcp_ddl(conn, schema, table)
     if kind == "http":
         return _http_ddl(conn, schema, table)
+    if kind == "sqlite":
+        return _sqlite_ddl(conn, schema, table)
     if kind == "mysql":
         return _my_ddl(conn, schema, table)
     if kind == "clickhouse":
@@ -1228,10 +1247,274 @@ def _ch_mutation(conn, sql: str) -> None:
     _ch_request(conn, sql, readonly=False)
 
 
+# --------------------------------------------------------------------------- #
+# SQLite (single file, no server)
+# --------------------------------------------------------------------------- #
+
+
+def _sqlite_lit(value: Any) -> str:
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "X'" + bytes(value).hex() + "'"
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _sqlite_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _sqlite_file(conn: dict[str, Any]) -> str:
+    path = str(conn.get("dbname") or "").strip()
+    if not path:
+        raise HTTPException(400, "SQLite database file is required")
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def _sqlite_open(conn: dict[str, Any], *, readonly: bool = True) -> sqlite3.Connection:
+    path = _sqlite_file(conn)
+    if not os.path.exists(path):
+        raise HTTPException(404, f"SQLite database file not found: {path}")
+    if not os.path.isfile(path):
+        raise HTTPException(400, f"SQLite path is not a file: {path}")
+    uri = "file:" + urllib.parse.quote(path, safe="/") + ("?mode=ro" if readonly else "?mode=rw")
+    try:
+        db = sqlite3.connect(uri, uri=True, timeout=10)
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute("PRAGMA busy_timeout = 5000")
+    except sqlite3.Error:
+        pass
+    return db
+
+
+def _sqlite_cell(value: Any) -> Any:
+    """JSON-friendly cell value: BLOBs become UTF-8 text or a hex literal."""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return "0x" + raw.hex()
+    return value
+
+
+def _sqlite_typeof(values: list[Any]) -> str:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            return "BOOLEAN"
+        if isinstance(value, int):
+            return "INTEGER"
+        if isinstance(value, float):
+            return "REAL"
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return "BLOB"
+        return "TEXT"
+    return ""
+
+
+def _sqlite_test(conn: dict[str, Any]) -> dict[str, Any]:
+    db = _sqlite_open(conn, readonly=True)
+    try:
+        version = db.execute("SELECT sqlite_version()").fetchone()[0]
+        tables = db.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchone()[0]
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+    return {
+        "version": f"SQLite {version} · {int(tables)} table(s)",
+        "database": _sqlite_file(conn),
+        "user": "sqlite",
+    }
+
+
+def _sqlite_tree(conn: dict[str, Any]) -> list[dict[str, Any]]:
+    db = _sqlite_open(conn, readonly=True)
+    try:
+        rows = db.execute(
+            "SELECT type, name FROM sqlite_master "
+            "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY name"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+    return [
+        {
+            "schema": "main",
+            "name": str(row["name"]),
+            "kind": "view" if str(row["type"]) == "view" else "table",
+            "est_rows": 0,
+        }
+        for row in rows
+    ]
+
+
+def _sqlite_columns(conn: dict[str, Any], schema: str, table: str) -> list[dict[str, Any]]:
+    db = _sqlite_open(conn, readonly=True)
+    try:
+        info = db.execute(f"PRAGMA table_info({_sqlite_lit(table)})").fetchall()
+        fks: dict[str, dict[str, Any]] = {}
+        try:
+            for row in db.execute(f"PRAGMA foreign_key_list({_sqlite_lit(table)})").fetchall():
+                fks[str(row["from"])] = {
+                    "schema": "main",
+                    "table": str(row["table"]),
+                    "column": str(row["to"]),
+                }
+        except sqlite3.Error:
+            pass
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+    return [
+        {
+            "name": str(row["name"]),
+            "type": str(row["type"] or ""),
+            "nullable": not bool(row["notnull"]) and not bool(row["pk"]),
+            "default": row["dflt_value"],
+            "pk": bool(row["pk"]),
+            "fk": fks.get(str(row["name"])),
+        }
+        for row in info
+    ]
+
+
+def _sqlite_rows(
+    conn, schema, table, limit, offset, order_by, direction, filters=None
+) -> dict[str, Any]:
+    meta = {column["name"]: column.get("type", "") for column in _sqlite_columns(conn, schema, table)}
+    sql = f"SELECT * FROM {_sqlite_ident(table)}"
+    where = _where_clause("sqlite", filters)
+    if where:
+        sql += f" WHERE {where}"
+    if order_by:
+        sql += f" ORDER BY {_sqlite_ident(order_by)} {direction}"
+    sql += f" LIMIT {limit + 1} OFFSET {offset}"
+    started = time.monotonic()
+    db = _sqlite_open(conn, readonly=True)
+    try:
+        cursor = db.execute(sql)
+        names = [column[0] for column in cursor.description or []]
+        rows = [[_sqlite_cell(value) for value in row] for row in cursor.fetchmany(limit + 1)]
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+    columns = [{"name": name, "type": meta.get(name, "")} for name in names]
+    return {
+        "columns": columns, "rows": rows[:limit], "truncated": len(rows) > limit,
+        "offset": offset, "limit": limit,
+        "duration_ms": round((time.monotonic() - started) * 1000),
+    }
+
+
+def _sqlite_query(conn, sql, limit, readonly) -> dict[str, Any]:
+    _guard_readonly(conn, sql)
+    is_read = bool(READ_SQL.match(sql))
+    started = time.monotonic()
+    db = _sqlite_open(conn, readonly=readonly)
+    try:
+        cursor = db.execute(sql)
+        if cursor.description:
+            names = [column[0] for column in cursor.description]
+            rows = [[_sqlite_cell(value) for value in row] for row in cursor.fetchmany(limit + 1)]
+        else:
+            names, rows = [], []
+        if not is_read:
+            db.commit()
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+    return {
+        "columns": [
+            {
+                "name": name,
+                "type": _sqlite_typeof([row[index] for row in rows[:20]]),
+            }
+            for index, name in enumerate(names)
+        ],
+        "rows": rows[:limit],
+        "truncated": len(rows) > limit,
+        "command": "SELECT" if is_read else sql.split(None, 1)[0].upper(),
+        "readonly": readonly,
+        "duration_ms": round((time.monotonic() - started) * 1000),
+    }
+
+
+def _sqlite_exec(conn: dict[str, Any], statements: list[str]) -> None:
+    """Run statements in one write transaction (sqlite3 allows one at a time)."""
+    db = _sqlite_open(conn, readonly=False)
+    try:
+        with db:
+            for statement in statements:
+                db.execute(statement)
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+
+
+def _sqlite_mutation(conn, sql: str) -> None:
+    _sqlite_exec(conn, [sql])
+
+
+def _sqlite_ddl(conn: dict[str, Any], schema: str, table: str) -> str:
+    db = _sqlite_open(conn, readonly=True)
+    try:
+        row = db.execute(
+            "SELECT sql FROM sqlite_master WHERE name = ? AND type IN ('table', 'view')",
+            (table,),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+    return str(row[0]) if row and row[0] else ""
+
+
+def _sqlite_indexes(conn: dict[str, Any], schema: str, table: str) -> list[dict[str, Any]]:
+    db = _sqlite_open(conn, readonly=True)
+    try:
+        listing = db.execute(f"PRAGMA index_list({_sqlite_lit(table)})").fetchall()
+        result = []
+        for row in listing:
+            name = str(row["name"])
+            columns = [
+                str(info["name"])
+                for info in db.execute(f"PRAGMA index_info({_sqlite_lit(name)})").fetchall()
+            ]
+            result.append(
+                {
+                    "name": name,
+                    "unique": bool(row["unique"]),
+                    "columns": ", ".join(columns),
+                    "primary": str(row["origin"]) == "pk",
+                }
+            )
+    except sqlite3.Error as exc:
+        raise HTTPException(400, f"SQLite: {exc}") from exc
+    finally:
+        db.close()
+    return result
+
+
 def _indexes(conn: dict[str, Any], schema: str, table: str) -> list[dict[str, Any]]:
     kind = _kind(conn)
     if kind in ("mcp", "http"):
         return []
+    if kind == "sqlite":
+        return _sqlite_indexes(conn, schema, table)
     if kind == "mysql":
         out = _my_run(
             conn,
@@ -1274,7 +1557,7 @@ def _indexes(conn: dict[str, Any], schema: str, table: str) -> list[dict[str, An
 
 def _activity(conn: dict[str, Any]) -> list[dict[str, Any]]:
     kind = _kind(conn)
-    if kind in ("mcp", "http"):
+    if kind in ("mcp", "http", "sqlite"):
         return []
     if kind == "mysql":
         out = _my_run(
@@ -1866,6 +2149,8 @@ def _test(conn: dict[str, Any]) -> dict[str, Any]:
         return _mcp_test(conn)
     if kind == "http":
         return _http_test(conn)
+    if kind == "sqlite":
+        return _sqlite_test(conn)
     if kind == "mysql":
         return _my_test(conn)
     if kind == "clickhouse":
@@ -1879,6 +2164,8 @@ def _tree(conn: dict[str, Any]) -> list[dict[str, Any]]:
         return _mcp_tree(conn)
     if kind == "http":
         return _http_tree(conn)
+    if kind == "sqlite":
+        return _sqlite_tree(conn)
     if kind == "mysql":
         return _my_tree(conn)
     if kind == "clickhouse":
@@ -1892,6 +2179,8 @@ def _columns(conn: dict[str, Any], schema: str, table: str) -> list[dict[str, An
         return _mcp_columns(conn, schema, table)
     if kind == "http":
         return _http_columns(conn, schema, table)
+    if kind == "sqlite":
+        return _sqlite_columns(conn, schema, table)
     if kind == "mysql":
         return _my_columns(conn, schema, table)
     if kind == "clickhouse":
@@ -1905,6 +2194,8 @@ def _rows(conn, schema, table, limit, offset, order_by, direction, filters=None)
         return _mcp_rows(conn, schema, table, limit, offset, order_by, direction, filters)
     if kind == "http":
         return _http_rows(conn, schema, table, limit, offset, order_by, direction, filters)
+    if kind == "sqlite":
+        return _sqlite_rows(conn, schema, table, limit, offset, order_by, direction, filters)
     if kind == "mysql":
         return _my_rows(
             conn, schema, table, limit, offset, order_by, direction,
@@ -1923,6 +2214,8 @@ def _query(conn, sql, limit, readonly) -> dict[str, Any]:
     if kind == "http":
         _guard_readonly(conn, sql)
         return _http_query(conn, sql, limit)
+    if kind == "sqlite":
+        return _sqlite_query(conn, sql, limit, readonly)
     if kind == "mysql":
         return _my_query(conn, sql, limit, readonly)
     if kind == "clickhouse":
@@ -1960,20 +2253,22 @@ async def save_connection(body: dict[str, Any]) -> dict[str, Any]:
         return default
 
     name = (body.get("name") or "").strip() or (body.get("dbname") or "").strip() or "Database"
-    host = "" if kind in ("mcp", "http") else str(pick("host", "127.0.0.1")).strip()
+    host = "" if kind in ("mcp", "http", "sqlite") else str(pick("host", "127.0.0.1")).strip()
     port = (
         0
-        if kind in ("mcp", "http")
+        if kind in ("mcp", "http", "sqlite")
         else int(pick("port", {"postgres": 5432, "mysql": 3306, "clickhouse": 8123}[kind]))
     )
     dbname = (body.get("dbname") or (existing or {}).get("dbname") or "").strip()
     user = (body.get("user") or (existing or {}).get("user") or "").strip()
     if not dbname:
         raise HTTPException(400, "database name is required")
+    if kind == "sqlite":
+        dbname = os.path.expanduser(dbname)
     if not user:
         user = {
             "postgres": "postgres", "mysql": "root", "clickhouse": "default",
-            "mcp": "mcp", "http": "http",
+            "mcp": "mcp", "http": "http", "sqlite": "sqlite",
         }[kind]
     mcp_server = str(pick("mcp_server", "")).strip()
     mcp_tool = str(pick("mcp_tool", "query")).strip() or "query"
@@ -2024,10 +2319,10 @@ async def save_connection(body: dict[str, Any]) -> dict[str, Any]:
         "sslmode": str(pick("sslmode", "prefer")).strip() or "prefer",
         "readonly": True if kind in ("mcp", "http") else bool(pick("readonly", True)),
         "production": bool(pick("production", False)),
-        "ssh_host": str(pick("ssh_host", "")).strip(),
-        "ssh_user": str(pick("ssh_user", "root")).strip(),
+        "ssh_host": "" if kind in ("mcp", "http", "sqlite") else str(pick("ssh_host", "")).strip(),
+        "ssh_user": "" if kind == "sqlite" else str(pick("ssh_user", "root")).strip(),
         "ssh_port": int(pick("ssh_port", 22)),
-        "ssh_key": str(pick("ssh_key", "")).strip(),
+        "ssh_key": "" if kind in ("mcp", "http", "sqlite") else str(pick("ssh_key", "")).strip(),
         "mcp_server": mcp_server,
         "mcp_tool": mcp_tool,
         "mcp_sql_arg": mcp_sql_arg,
@@ -2039,8 +2334,8 @@ async def save_connection(body: dict[str, Any]) -> dict[str, Any]:
         "http_body_mode": http_body_mode,
         "http_dialect": http_dialect,
         "http_timeout": http_timeout,
-        "tunnel_command": str(pick("tunnel_command", "")).strip(),
-        "tunnel_env": str(pick("tunnel_env", "")),
+        "tunnel_command": "" if kind == "sqlite" else str(pick("tunnel_command", "")).strip(),
+        "tunnel_env": "" if kind == "sqlite" else str(pick("tunnel_env", "")),
         "tunnel_timeout": max(5, min(int(pick("tunnel_timeout", 25)), 120)),
         "db_labels": {
             str(k)[:128]: str(v)[:80] for k, v in (labels or {}).items() if str(v).strip()
@@ -2086,8 +2381,10 @@ async def test_connection(body: dict[str, Any]) -> dict[str, Any]:
     if not conn.get("user"):
         conn["user"] = {
             "postgres": "postgres", "mysql": "root", "clickhouse": "default",
-            "mcp": "mcp", "http": "http",
+            "mcp": "mcp", "http": "http", "sqlite": "sqlite",
         }.get(_kind(conn), "postgres")
+    if _kind(conn) == "sqlite":
+        conn["dbname"] = os.path.expanduser(str(conn.get("dbname") or ""))
     return {"ok": True, "server": _test(conn)}
 
 
@@ -2120,6 +2417,8 @@ async def connection_databases(conn_id: str) -> dict[str, Any]:
         names = _mcp_databases(conn)
     elif kind == "http":
         names = _http_databases(conn)
+    elif kind == "sqlite":
+        names = ["main"]
     elif kind == "mysql":
         out = _my_run(conn, "SHOW DATABASES", readonly=True)
         _, rows = _parse_my(out)
@@ -2279,10 +2578,16 @@ async def wordpress_info(conn_id: str, database: str = "") -> dict[str, Any]:
 async def connection_activity(conn_id: str) -> dict[str, Any]:
     conn = _connect(conn_id)
     queries = _activity(conn)
+    kind = _kind(conn)
+    note = {
+        "sqlite": "SQLite is a local file; it has no server sessions to monitor.",
+        "mcp": "MCP connections do not expose server sessions.",
+        "http": "HTTP gateways do not expose server sessions.",
+    }.get(kind, "Visibility depends on the database account's privileges (pg_monitor / PROCESS).")
     return {
         "queries": queries,
         "count": len(queries),
-        "note": "Visibility depends on the database account's privileges (pg_monitor / PROCESS).",
+        "note": note,
     }
 
 
@@ -2310,7 +2615,13 @@ async def table_index(body: dict[str, Any]) -> dict[str, Any]:
         if not columns or any(not IDENT_RE.match(column) for column in columns):
             raise HTTPException(400, "at least one valid column is required")
         unique = bool(body.get("unique"))
-        if kind == "mysql":
+        if kind == "sqlite":
+            cols = ", ".join(_sqlite_ident(column) for column in columns)
+            sql = (
+                f"CREATE {'UNIQUE ' if unique else ''}INDEX {_sqlite_ident(name)} "
+                f"ON {_sqlite_ident(table)} ({cols})"
+            )
+        elif kind == "mysql":
             cols = ", ".join(_my_ident(column) for column in columns)
             sql = (
                 f"CREATE {'UNIQUE ' if unique else ''}INDEX {_my_ident(name)} "
@@ -2323,7 +2634,9 @@ async def table_index(body: dict[str, Any]) -> dict[str, Any]:
                 f"ON {_ident(schema)}.{_ident(table)} ({cols})"
             )
     elif action == "drop":
-        if kind == "mysql":
+        if kind == "sqlite":
+            sql = f"DROP INDEX {_sqlite_ident(name)}"
+        elif kind == "mysql":
             sql = (
                 f"ALTER TABLE {_my_ident(schema)}.{_my_ident(table)} "
                 f"DROP INDEX {_my_ident(name)}"
@@ -2678,6 +2991,10 @@ def _predicate(quote, literal, pk: dict[str, Any]) -> str:
 
 def _build_update(conn, schema, table, pk, changes) -> tuple[str, bool]:
     kind = _kind(conn)
+    if kind == "sqlite":
+        sets = ", ".join(f"{_sqlite_ident(k)} = {_sqlite_lit(v)}" for k, v in changes.items())
+        where = _predicate(_sqlite_ident, _sqlite_lit, pk)
+        return f"UPDATE {_sqlite_ident(table)} SET {sets} WHERE {where}", False
     if kind == "mysql":
         sets = ", ".join(f"{_my_ident(k)} = {_my_lit(v)}" for k, v in changes.items())
         where = _predicate(_my_ident, _my_lit, pk)
@@ -2696,6 +3013,9 @@ def _build_update(conn, schema, table, pk, changes) -> tuple[str, bool]:
 
 def _build_delete(conn, schema, table, pk) -> tuple[str, bool]:
     kind = _kind(conn)
+    if kind == "sqlite":
+        where = _predicate(_sqlite_ident, _sqlite_lit, pk)
+        return f"DELETE FROM {_sqlite_ident(table)} WHERE {where}", False
     if kind == "mysql":
         where = _predicate(_my_ident, _my_lit, pk)
         return f"DELETE FROM {_my_ident(schema)}.{_my_ident(table)} WHERE {where}", False
@@ -2708,6 +3028,10 @@ def _build_delete(conn, schema, table, pk) -> tuple[str, bool]:
 
 def _build_insert(conn, schema, table, values) -> tuple[str, bool]:
     kind = _kind(conn)
+    if kind == "sqlite":
+        cols = ", ".join(_sqlite_ident(k) for k in values)
+        vals = ", ".join("NULL" if v is None else _sqlite_lit(v) for v in values.values())
+        return f"INSERT INTO {_sqlite_ident(table)} ({cols}) VALUES ({vals})", False
     if kind == "mysql":
         cols = ", ".join(_my_ident(k) for k in values)
         vals = ", ".join("NULL" if v is None else _my_lit(v) for v in values.values())
@@ -2723,19 +3047,28 @@ def _build_insert(conn, schema, table, values) -> tuple[str, bool]:
 
 def _build_insert_multi(conn, schema, table, columns, rows) -> str:
     kind = _kind(conn)
-    quote = {"postgres": _ident, "mysql": _my_ident, "clickhouse": _ch_ident}[kind]
-    literal = {"postgres": _lit, "mysql": _my_lit, "clickhouse": _ch_lit}[kind]
+    quote = {
+        "postgres": _ident, "mysql": _my_ident, "clickhouse": _ch_ident, "sqlite": _sqlite_ident
+    }[kind]
+    literal = {
+        "postgres": _lit, "mysql": _my_lit, "clickhouse": _ch_lit, "sqlite": _sqlite_lit
+    }[kind]
     cols = ", ".join(quote(column) for column in columns)
     values = ",\n  ".join(
         "(" + ", ".join("NULL" if value is None else literal(value) for value in row) + ")"
         for row in rows
     )
-    return f"INSERT INTO {quote(schema)}.{quote(table)} ({cols}) VALUES\n  {values}"
+    target = (
+        f"{quote(table)}" if kind == "sqlite" else f"{quote(schema)}.{quote(table)}"
+    )
+    return f"INSERT INTO {target} ({cols}) VALUES\n  {values}"
 
 
 def _run_mutation(conn, sql: str) -> None:
     kind = _kind(conn)
-    if kind == "mysql":
+    if kind == "sqlite":
+        _sqlite_mutation(conn, sql)
+    elif kind == "mysql":
         _my_mutation(conn, sql)
     elif kind == "clickhouse":
         _ch_mutation(conn, sql)
@@ -2776,9 +3109,15 @@ async def alter_table(body: dict[str, Any]) -> dict[str, Any]:
     if not IDENT_RE.match(name):
         raise HTTPException(400, "invalid column name")
     kind = _kind(conn)
-    quote = {"postgres": _ident, "mysql": _my_ident, "clickhouse": _ch_ident}[kind]
-    literal = {"postgres": _lit, "mysql": _my_lit, "clickhouse": _ch_lit}[kind]
-    target = f"{quote(schema)}.{quote(table)}"
+    quote = {
+        "postgres": _ident, "mysql": _my_ident, "clickhouse": _ch_ident, "sqlite": _sqlite_ident
+    }[kind]
+    literal = {
+        "postgres": _lit, "mysql": _my_lit, "clickhouse": _ch_lit, "sqlite": _sqlite_lit
+    }[kind]
+    target = (
+        f"{quote(table)}" if kind == "sqlite" else f"{quote(schema)}.{quote(table)}"
+    )
 
     if action == "add_column":
         column_type = str(body.get("type") or "").strip()
@@ -2897,7 +3236,9 @@ async def delete_rows_bulk(body: dict[str, Any]) -> dict[str, Any]:
         return {"preview": True, "sql": preview_sql + ";", "rows": len(statements)}
     _require_approval(conn, body, "delete_bulk", preview_sql + ";")
     kind = _kind(conn)
-    if kind == "mysql":
+    if kind == "sqlite":
+        _sqlite_exec(conn, statements)
+    elif kind == "mysql":
         _my_run(conn, "START TRANSACTION;\n" + ";\n".join(statements) + ";\nCOMMIT;", readonly=False)
     elif kind == "clickhouse":
         for statement in statements:
@@ -2972,7 +3313,9 @@ async def import_rows(body: dict[str, Any]) -> dict[str, Any]:
 
     _require_approval(conn, body, "import", preview_sql)
     kind = _kind(conn)
-    if kind == "clickhouse":
+    if kind == "sqlite":
+        _sqlite_exec(conn, statements)
+    elif kind == "clickhouse":
         for statement in statements:
             _ch_mutation(conn, statement)
     elif kind == "mysql":

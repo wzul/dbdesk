@@ -1,9 +1,9 @@
 # DB Desk — Panduan Pengguna
 
 DB Desk ialah browser database gaya TablePlus yang hidup **di dalam Hermes** —
-satu page dalam sidebar Desktop/Webapp. Sokongan **PostgreSQL, MySQL/MariaDB dan
-ClickHouse**, dengan SSH tunnel, edit data, SQL runner, import/export dan tools
-read-only untuk agent.
+satu page dalam sidebar Desktop/Webapp. Sokongan **PostgreSQL, MySQL/MariaDB,
+ClickHouse dan SQLite**, dengan SSH tunnel, edit data, SQL runner, import/export
+dan tools read-only untuk agent.
 
 > Skrin di bawah diambil pada build semasa. UI mungkin berubah sedikit antara
 > versi.
@@ -26,7 +26,8 @@ Klik **+** dalam bahagian CONNECTIONS (atau **Connection** di header).
 
 | Field | Nota |
 |---|---|
-| **Type** | PostgreSQL / MySQL-MariaDB / ClickHouse (port auto: 5432 / 3306 / 8123) |
+| **Type** | PostgreSQL / MySQL-MariaDB / ClickHouse / SQLite (port auto: 5432 / 3306 / 8123) |
+| **Database file** | Khusus SQLite — path penuh ke fail `.db`/`.sqlite` pada host Hermes (cth `/root/data/app.db`). Tiada host/port/SSH |
 | **Name / Group** | Group optional — connections dikumpul dalam sidebar |
 | **Host / Port** | Alamat DB. Dengan SSH tunnel, ini alamat **sebagaimana server SSH nampak** (cth `127.0.0.1:3307`) |
 | **Database / User / Password** | Password disimpan encrypted; tak pernah dipulangkan ke UI |
@@ -144,7 +145,7 @@ Tab **SQL**.
 ## 5. Schema
 
 Tab **Schema** tunjuk DDL table: `\d+` untuk PostgreSQL, `SHOW CREATE TABLE`
-untuk MySQL/ClickHouse.
+untuk MySQL/ClickHouse, `sqlite_master.sql` untuk SQLite.
 
 ![Schema DDL](img/06-schema-ddl.png)
 
@@ -156,8 +157,8 @@ untuk MySQL/ClickHouse.
 
 - **+ Column / − Column / Rename** — DDL editor ringkas (nama, type, default,
   nullable). Preview → Execute; grid & DDL refresh.
-- **Indexes** — senarai index (PG/MySQL), create (unique optional) atau drop.
-  Primary key dilindungi. ClickHouse tak support index editing.
+- **Indexes** — senarai index (PG/MySQL/SQLite), create (unique optional) atau
+  drop. Primary key dilindungi. ClickHouse tak support index editing.
 
   ![Indexes](img/08-indexes.png)
 
@@ -167,6 +168,8 @@ untuk MySQL/ClickHouse.
   Drawer tunjuk preview 5 row, bilangan row/column, dan checkbox **empty =
   NULL**. Import → preview SQL → Execute. Max 5000 row, batch 200.
 - **Export CSV** — export **seluruh table** (server-side, cap 50,000 row).
+- Untuk SQLite, import/delete bulk dijalankan satu statement pada satu masa
+  dalam satu transaksi (driver stdlib tak terima multi-statement).
 
 ![Import CSV](img/09-import.png)
 

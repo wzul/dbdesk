@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- **SQLite** connections: open a local `.db` file (path instead of host/port), read-only via `mode=ro`.
+- SQLite schema tree (`sqlite_master`), typed columns (`PRAGMA table_info`), indexes, DDL, inline edit/insert/delete, filters, CSV import/export, add/drop/rename column, index create/drop.
+- SQLite statements run one at a time inside a transaction (stdlib `sqlite3`); BLOBs render as UTF-8 text or hex.
+- Connection form: SQLite hides host/port/user/password/SSL/SSH and asks for a **Database file**.
+- Activity drawer shows a SQLite-specific note (no server sessions).
+
 ## 0.1.0
 
 First public release.

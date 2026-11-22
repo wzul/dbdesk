@@ -3241,7 +3241,7 @@ function ConnectionDrawer({ draft, onDraft, onClose, onSaved, onDeleted }) {
                       value: draft.kind || 'postgres',
                       onChange: (event) => {
                         const kind = event.target.value
-                        const defaults = { postgres: 5432, mysql: 3306, clickhouse: 8123, mcp: 0 }
+                        const defaults = { postgres: 5432, mysql: 3306, clickhouse: 8123, mcp: 0, http: 0, sqlite: 0 }
                         const oldDefault = draft.kind ? defaults[draft.kind] : undefined
                         const current = Number(draft.port)
                         const nextPort =
@@ -3254,12 +3254,13 @@ function ConnectionDrawer({ draft, onDraft, onClose, onSaved, onDeleted }) {
                         jsx('option', { value: 'postgres', children: 'PostgreSQL' }, 'postgres'),
                         jsx('option', { value: 'mysql', children: 'MySQL / MariaDB' }, 'mysql'),
                         jsx('option', { value: 'clickhouse', children: 'ClickHouse' }, 'clickhouse'),
+                        jsx('option', { value: 'sqlite', children: 'SQLite (file)' }, 'sqlite'),
                         jsx('option', { value: 'mcp', children: 'MCP (query tool)' }, 'mcp'),
                         jsx('option', { value: 'http', children: 'HTTP (query gateway)' }, 'http')
                       ]
                     })
                   }),
-                  !['mcp', 'http'].includes(draft.kind || 'postgres')
+                  !['mcp', 'http', 'sqlite'].includes(draft.kind || 'postgres')
                     ? jsx(Field, {
                         label: 'Port',
                         children: jsx(Input, {
@@ -3436,27 +3437,45 @@ function ConnectionDrawer({ draft, onDraft, onClose, onSaved, onDeleted }) {
                       })
                     ]
                   })
-                : jsx(Field, {
-                    key: 'host',
-                    label: 'Host',
-                    children: jsx(Input, { value: draft.host || '', onChange: set('host') })
-                  }),
+                : (draft.kind || 'postgres') === 'sqlite'
+                  ? null
+                  : jsx(Field, {
+                      key: 'host',
+                      label: 'Host',
+                      children: jsx(Input, { value: draft.host || '', onChange: set('host') })
+                    }),
               jsxs('div', {
-                className: 'grid grid-cols-2 gap-3',
+                className:
+                  (draft.kind || 'postgres') === 'sqlite'
+                    ? 'grid grid-cols-1 gap-3'
+                    : 'grid grid-cols-2 gap-3',
                 children: [
                   jsx(Field, {
                     key: 'db',
-                    label: 'Database',
-                    children: jsx(Input, { value: draft.dbname || '', onChange: set('dbname') })
+                    label: (draft.kind || 'postgres') === 'sqlite' ? 'Database file' : 'Database',
+                    hint:
+                      (draft.kind || 'postgres') === 'sqlite'
+                        ? 'Absolute path to the .db/.sqlite file on the machine running Hermes.'
+                        : undefined,
+                    children: jsx(Input, {
+                      value: draft.dbname || '',
+                      placeholder:
+                        (draft.kind || 'postgres') === 'sqlite'
+                          ? '/root/data/app.db'
+                          : undefined,
+                      onChange: set('dbname')
+                    })
                   }),
-                  jsx(Field, {
-                    key: 'user',
-                    label: 'User',
-                    children: jsx(Input, { value: draft.user || '', onChange: set('user') })
-                  })
+                  (draft.kind || 'postgres') === 'sqlite'
+                    ? null
+                    : jsx(Field, {
+                        key: 'user',
+                        label: 'User',
+                        children: jsx(Input, { value: draft.user || '', onChange: set('user') })
+                      })
                 ]
               }),
-              !['mcp', 'http'].includes(draft.kind || 'postgres')
+              !['mcp', 'http', 'sqlite'].includes(draft.kind || 'postgres')
                 ? jsx(Field, {
                     label: 'Password',
                     hint: editing ? 'Leave blank to keep the saved password.' : undefined,
@@ -3468,7 +3487,7 @@ function ConnectionDrawer({ draft, onDraft, onClose, onSaved, onDeleted }) {
                     })
                   })
                 : null,
-              !['mysql', 'mcp', 'http'].includes(draft.kind || 'postgres')
+              !['mysql', 'mcp', 'http', 'sqlite'].includes(draft.kind || 'postgres')
                 ? jsx(Field, {
                 label: 'SSL mode',
                 children: jsxs('select', {
@@ -3481,7 +3500,7 @@ function ConnectionDrawer({ draft, onDraft, onClose, onSaved, onDeleted }) {
                 })
               })
                 : null,
-              ['mcp', 'http'].includes(draft.kind || 'postgres')
+              ['mcp', 'http', 'sqlite'].includes(draft.kind || 'postgres')
                 ? null
                 : jsxs('div', {
                 key: 'ssh',
@@ -4952,6 +4971,7 @@ export function DbDesk() {
                         postgres: 'PG',
                         mysql: 'MySQL',
                         clickhouse: 'CH',
+                        sqlite: 'SQLite',
                         mcp: 'MCP',
                         http: 'HTTP'
                       }[active.kind || 'postgres'] || 'PG'
@@ -4959,7 +4979,10 @@ export function DbDesk() {
                   jsx('span', {
                     key: 'h',
                     className: 'hidden min-w-0 truncate font-mono opacity-80 lg:inline',
-                    children: `${active.user}@${active.host}:${active.port}/${active.dbname}`
+                    children:
+                      (active.kind || 'postgres') === 'sqlite'
+                        ? active.dbname
+                        : `${active.user}@${active.host}:${active.port}/${active.dbname}`
                   }),
                   active.ssh_host
                     ? jsx(Badge, {

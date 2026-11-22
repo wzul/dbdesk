@@ -136,6 +136,24 @@ class TestHelpers(unittest.TestCase):
             api._where_clause("clickhouse", [{"column": "n", "op": "gt", "value": "5"}]),
             "`n` > '5'",
         )
+        self.assertEqual(
+            api._where_clause("sqlite", [{"column": "n", "op": "eq", "value": "5"}]),
+            '"n" = \'5\'',
+        )
+        self.assertEqual(
+            api._where_clause(
+                "sqlite",
+                [{"column": "name", "op": "contains", "value": "x", "insensitive": False}],
+            ),
+            "instr(CAST(\"name\" AS TEXT), 'x') > 0",
+        )
+        self.assertEqual(
+            api._where_clause(
+                "sqlite",
+                [{"column": "name", "op": "startswith", "value": "x"}],
+            ),
+            "lower(substr(CAST(\"name\" AS TEXT), 1, length('x'))) = lower('x')",
+        )
 
     def test_like_escape(self):
         self.assertEqual(api._like_escape("50%_x"), "50\\%\\_x")
@@ -279,6 +297,16 @@ class TestBuilders(unittest.TestCase):
             'INSERT INTO "public"."t" ("a", "b") VALUES\n  (\'1\', NULL),\n  (\'2\', \'x\')',
         )
 
+    def test_sqlite_builders_are_unqualified(self):
+        sql, _ = api._build_update(conn("sqlite"), "main", "users", {"id": 1}, {"name": "x"})
+        self.assertEqual(sql, 'UPDATE "users" SET "name" = \'x\' WHERE "id" = \'1\'')
+        sql, _ = api._build_delete(conn("sqlite"), "main", "users", {"id": 1})
+        self.assertEqual(sql, 'DELETE FROM "users" WHERE "id" = \'1\'')
+        sql, _ = api._build_insert(conn("sqlite"), "main", "users", {"id": 1})
+        self.assertEqual(sql, 'INSERT INTO "users" ("id") VALUES (\'1\')')
+        sql = api._build_insert_multi(conn("sqlite"), "main", "t", ["a"], [["1"]])
+        self.assertEqual(sql, 'INSERT INTO "t" ("a") VALUES\n  (\'1\')')
+
 
 # --------------------------------------------------------------------------- #
 # query history + views
@@ -319,6 +347,116 @@ class TestStores(Base):
         self.assertEqual(views[0]["name"], "v1")
         await api.delete_view(saved["view"]["id"])
         self.assertEqual((await api.list_views())["views"], [])
+
+
+# --------------------------------------------------------------------------- #
+# SQLite (local file)
+# --------------------------------------------------------------------------- #
+
+
+class TestSqlite(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        import sqlite3
+
+        self.path = str(self.home / "app.db")
+        db = sqlite3.connect(self.path)
+        db.executescript(
+            """
+            CREATE TABLE users (
+              id INTEGER PRIMARY KEY,
+              name TEXT NOT NULL,
+              age INTEGER
+            );
+            CREATE INDEX idx_users_name ON users(name);
+            CREATE VIEW adults AS SELECT * FROM users WHERE age >= 18;
+            INSERT INTO users (name, age) VALUES ('Ali', 30), ('Siti', 17), ('ali baba', 40);
+            """
+        )
+        db.commit()
+        db.close()
+        self.writable = self.conn(
+            "sqlite", dbname=self.path, readonly=False, port=0, host="", user="sqlite"
+        )
+        self.readonly = {**self.writable, "readonly": True}
+
+    def test_metadata(self):
+        server = api._test(self.writable)
+        self.assertIn("SQLite", server["version"])
+        self.assertEqual(server["user"], "sqlite")
+
+        tree = {row["name"]: row for row in api._tree(self.writable)}
+        self.assertEqual(tree["users"]["kind"], "table")
+        self.assertEqual(tree["users"]["schema"], "main")
+        self.assertEqual(tree["adults"]["kind"], "view")
+
+        columns = api._columns(self.writable, "main", "users")
+        self.assertEqual([column["name"] for column in columns], ["id", "name", "age"])
+        self.assertTrue(columns[0]["pk"])
+        self.assertFalse(columns[0]["nullable"])
+        self.assertFalse(columns[1]["nullable"])
+
+        indexes = api._indexes(self.writable, "main", "users")
+        self.assertEqual(indexes[0]["name"], "idx_users_name")
+        self.assertEqual(indexes[0]["columns"], "name")
+
+        self.assertIn("CREATE TABLE users", api._ddl(self.writable, "main", "users"))
+
+    def test_rows_and_case_insensitive_filter(self):
+        result = api._rows(
+            self.readonly, "main", "users", 10, 0, "id", "ASC",
+            [{"column": "name", "op": "contains", "value": "ALI"}],
+        )
+        self.assertEqual([row[1] for row in result["rows"]], ["Ali", "ali baba"])
+
+        page = api._rows(self.readonly, "main", "users", 2, 0, "id", "ASC")
+        self.assertTrue(page["truncated"])
+        self.assertEqual(len(page["rows"]), 2)
+
+    def test_query_and_readonly_guard(self):
+        result = api._query(self.readonly, "select name, age from users order by id", 10, True)
+        self.assertEqual(result["rows"][0], ["Ali", 30])
+        self.assertEqual(result["command"], "SELECT")
+        with self.assertRaises(HTTPException) as ctx:
+            api._query(self.readonly, "delete from users", 10, True)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_mutations(self):
+        insert = api._build_insert(self.writable, "main", "users", {"name": "Abu", "age": 22})[0]
+        api._mutation(self.writable, {}, insert, False, "insert")
+        update = api._build_update(self.writable, "main", "users", {"name": "Abu"}, {"age": 23})[0]
+        api._mutation(self.writable, {}, update, False, "update")
+        self.assertIn(23, [row[2] for row in api._rows(self.writable, "main", "users", 10, 0, "id", "ASC")["rows"]])
+        delete = api._build_delete(self.writable, "main", "users", {"name": "Abu"})[0]
+        api._mutation(self.writable, {}, delete, False, "delete")
+        self.assertNotIn("Abu", [row[1] for row in api._rows(self.writable, "main", "users", 10, 0, "id", "ASC")["rows"]])
+
+    def test_bulk_exec_is_transactional(self):
+        api._sqlite_exec(
+            self.writable,
+            ["DELETE FROM users WHERE id = 1", "DELETE FROM users WHERE id = 2"],
+        )
+        rows = api._rows(self.writable, "main", "users", 10, 0, "id", "ASC")["rows"]
+        self.assertEqual(len(rows), 1)
+
+    def test_missing_file(self):
+        ghost = {**self.readonly, "dbname": str(self.home / "nope.db")}
+        with self.assertRaises(HTTPException) as ctx:
+            api._test(ghost)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_save_connection_defaults(self):
+        saved = await api.save_connection(
+            {"kind": "sqlite", "name": "Local", "dbname": "~/app.db"}
+        )
+        record = saved["connection"]
+        self.assertEqual(record["host"], "")
+        self.assertEqual(record["port"], 0)
+        self.assertEqual(record["user"], "sqlite")
+        self.assertEqual(record["ssh_host"], "")
+        self.assertTrue(record["readonly"])
+        self.assertTrue(record["dbname"].endswith("/app.db"))
+        self.assertEqual((await api.connection_databases(record["id"]))["databases"], [{"name": "main", "label": ""}])
 
 
 # --------------------------------------------------------------------------- #

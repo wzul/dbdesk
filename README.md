@@ -1,8 +1,8 @@
 # DB Desk
 
 A TablePlus-style database browser that runs inside **Hermes** — PostgreSQL,
-MySQL/MariaDB and ClickHouse, plus MCP servers and HTTP query gateways (including
-Cloudflare Zero Trust). Connections, a schema tree, typed inline editing, a SQL
+MySQL/MariaDB, ClickHouse and SQLite, plus MCP servers and HTTP query gateways
+(including Cloudflare Zero Trust). Connections, a schema tree, typed inline editing, a SQL
 runner, CSV import/export, saved views, schema diff/index tools and a full audit
 log, all from the Hermes Desktop/Webapp.
 
@@ -10,9 +10,10 @@ log, all from the Hermes Desktop/Webapp.
 
 ## Features
 
-- **Connections** — PostgreSQL, MySQL/MariaDB, ClickHouse, **MCP query tools**
-  and **HTTP query gateways**; optional **SSH tunnel** or **custom tunnel
-  command** (SSM port forwarding, `cloudflared access tcp`, ...).
+- **Connections** — PostgreSQL, MySQL/MariaDB, ClickHouse, **SQLite** (a local
+  `.db` file, read-only via `mode=ro`), **MCP query tools** and **HTTP query
+  gateways**; optional **SSH tunnel** or **custom tunnel command** (SSM port
+  forwarding, `cloudflared access tcp`, ...).
 - **Secrets** — passwords encrypted with AES-GCM; key in `vault.key` (0600);
   never returned to the UI. Custom tunnel env and HTTP headers stay in the
   0600 connection store.
@@ -27,8 +28,9 @@ log, all from the Hermes Desktop/Webapp.
   write is audited (`audit.jsonl`, 0600).
 - **SQL** — autocomplete (keywords, tables, referenced tables' columns),
   formatter, history, saved queries, CSV, SVG bar/line charts.
-- **Schema** — DDL view, cross-connection column diff, add/drop/rename column,
-  index create/drop, all through the SQL preview/approval flow.
+- **Schema** — DDL view (`\d+`, `SHOW CREATE TABLE`, `sqlite_master.sql`),
+  cross-connection column diff, add/drop/rename column, index create/drop, all
+  through the SQL preview/approval flow.
 - **CSV** — import (preview + approval, 5000 rows) and whole-table export
   (server-side, 50k cap).
 - **Serialized PHP** — detect, parse and fix `s:N` lengths in `wp_options`.
@@ -70,7 +72,7 @@ pip install fastapi cryptography
 PYTHON=python ./tests/run.sh
 ```
 
-43 backend/agent tests; no database server required (dialects mocked, temporary
+51 backend/agent tests; no database server required (dialects mocked, temporary
 `HERMES_HOME`, local HTTP mock). The desktop half is checked with
 `node --check` in CI.
 
