@@ -244,6 +244,73 @@ class TestVault(Base):
         self.assertTrue(raw["password_enc"].startswith("v1:"))
         self.assertEqual(api._get(raw["id"])["password"], "hunter2")
 
+    def test_clickhouse_header_parser(self):
+        headers = api._parse_ch_headers(
+            "CF-Access-Client-Id: abc\nX-Test:  1\n# comment\n"
+        )
+        self.assertEqual(headers["CF-Access-Client-Id"], "abc")
+        self.assertEqual(headers["X-Test"], "1")
+        with self.assertRaises(HTTPException):
+            api._parse_ch_headers("not a header", strict=True)
+        with self.assertRaises(HTTPException):
+            api._parse_ch_headers("Host: evil", strict=True)
+
+    def test_clickhouse_url_path(self):
+        conn = self.conn(
+            "clickhouse",
+            host="ch.example.com",
+            port=443,
+            dbname="default",
+            sslmode="require",
+            ch_path="ch",
+        )
+        url = api._ch_url(conn, True)
+        self.assertTrue(url.startswith("https://ch.example.com:443/ch?"))
+        self.assertIn("readonly=1", url)
+
+    async def test_clickhouse_headers_are_encrypted(self):
+        saved = await api.save_connection(
+            {
+                "kind": "clickhouse",
+                "name": "CH",
+                "host": "ch.example.com",
+                "port": 443,
+                "dbname": "default",
+                "user": "default",
+                "password": "pw",
+                "sslmode": "require",
+                "ch_path": "/ch",
+                "ch_headers": "CF-Access-Client-Id: id\nCF-Access-Client-Secret: sec",
+            }
+        )
+        public = saved["connection"]
+        cid = public["id"]
+        self.assertTrue(public["ch_headers_set"])
+        self.assertNotIn("ch_headers", public)
+        self.assertEqual(public["ch_path"], "/ch")
+        raw = (api._store_path()).read_text()
+        self.assertNotIn("CF-Access-Client-Secret", raw)
+        self.assertIn("ch_headers_enc", json.loads(raw)["connections"][0])
+
+        conn = api._get(cid)
+        self.assertIn("CF-Access-Client-Secret: sec", conn["ch_headers"])
+        await api.save_connection({**public, "id": cid, "name": "CH renamed"})
+        self.assertIn("CF-Access-Client-Secret: sec", api._get(cid)["ch_headers"])
+
+        secure = api._bundle_document(
+            [api._load()[0]], True, "correct horse battery", source_ids=True
+        )
+        data = api._bundle_open(secure["bundle"], "correct horse battery")
+        self.assertIn("CF-Access-Client-Secret", data["connections"][0]["ch_headers"])
+        plain = api._bundle_document([api._load()[0]], False, "")
+        opened = api._bundle_open(plain["bundle"], "")
+        self.assertNotIn("ch_headers", opened["connections"][0])
+
+        await api.save_connection(
+            {**api._public(api._get(cid)), "id": cid, "ch_headers_clear": True}
+        )
+        self.assertEqual(api._get(cid)["ch_headers"], "")
+
     def test_plaintext_migration(self):
         path = api._store_path()
         path.write_text(

@@ -336,6 +336,23 @@ guna connection yang sama, termasuk SSH tunnel dan vault decrypt.
   bertanda dihantar dalam WHERE. Tekan **Enter** pada satu baris untuk apply
   baris itu (yang lain kekal ikut checkbox). Saved view simpan flag enabled.
 
+## 15c. ClickHouse + Cloudflare Access
+
+ClickHouse guna HTTP interface, jadi Zero Trust app boleh terus connect:
+
+1. Cloudflare Zero Trust → **Access → Service Auth** → cipta service token.
+2. Connection: host = hostname awam, port `443`, SSL mode `require`.
+3. **HTTP path** jika endpoint di subpath (default `/`).
+4. **Custom HTTP headers** — satu baris satu header:
+
+   ```
+   CF-Access-Client-Id: <id>.access
+   CF-Access-Client-Secret: <secret>
+   ```
+
+Headers disimpan AES-GCM, tidak dipulangkan ke UI/AI, dan hanya masuk
+export/backup bila **Include passwords** ditick.
+
 ## 16. Keselamatan
 
 - Password **AES-GCM** dalam `plugin-data/dbdesk/connections.json`; key dalam

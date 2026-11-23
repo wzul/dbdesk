@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- ClickHouse: optional HTTP path and encrypted custom HTTP headers (Cloudflare Access service tokens, API gateway headers).
+
 ## 0.6.0
 
 - Schema tab is a structure grid (columns with charset, collation, nullable, default, extra, FK, comment; index grid) instead of a DDL block; DDL moved to a button.
