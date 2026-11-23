@@ -352,6 +352,11 @@ class TestVault(Base):
         cid = public["id"]
         self.assertTrue(public["ch_headers_set"])
         self.assertNotIn("ch_headers", public)
+        self.assertEqual(
+            public["ch_header_names"],
+            ["CF-Access-Client-Id", "CF-Access-Client-Secret"],
+        )
+        self.assertNotIn("sec", json.dumps(public["ch_header_names"]))
         self.assertEqual(public["ch_path"], "/ch")
         raw = (api._store_path()).read_text()
         self.assertNotIn("CF-Access-Client-Secret", raw)
@@ -375,6 +380,7 @@ class TestVault(Base):
             {**api._public(api._get(cid)), "id": cid, "ch_headers_clear": True}
         )
         self.assertEqual(api._get(cid)["ch_headers"], "")
+        self.assertEqual(api._public(api._get(cid))["ch_header_names"], [])
 
     def test_plaintext_migration(self):
         path = api._store_path()

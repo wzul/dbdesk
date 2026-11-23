@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.7
+
+- ClickHouse header edit form lists saved header names (values stay encrypted) and states that new lines replace the saved set.
+
 ## 0.6.6
 
 - ClickHouse/HTTP requests send a browser User-Agent by default, avoiding Cloudflare Bot Fight Mode error 1010; custom `User-Agent` headers override it case-insensitively.
