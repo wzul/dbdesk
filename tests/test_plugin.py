@@ -537,6 +537,59 @@ class TestAi(Base):
         self.assertEqual(result["sql"], "select 1 as one")
         self.assertEqual(result["explanation"], "one")
 
+    def test_context_matches_singular_table_names(self):
+        tables = [
+            {"schema": "public", "name": "push_settings", "kind": "table", "est_rows": 0},
+            {"schema": "public", "name": "purchases", "kind": "table", "est_rows": 0},
+        ]
+        columns = {
+            "push_settings": [{"name": "created_at", "type": "timestamptz"}],
+            "purchases": [
+                {"name": "created_on", "type": "timestamptz"},
+                {"name": "amount", "type": "numeric"},
+            ],
+        }
+
+        with mock.patch.object(api, "_tree", return_value=tables), \
+             mock.patch.object(api, "_columns", side_effect=lambda c, s, t: columns[t]):
+            context = api._ai_schema_context(
+                self.conn("postgres"), "public", "push_settings", "berapa purchase hari ni"
+            )
+
+        self.assertIn("purchases", context)
+        self.assertIn("created_on", context)
+
+    async def test_history_is_forwarded(self):
+        captured = {}
+
+        def fake(config, payload):
+            captured.update(payload)
+            return {
+                "choices": [
+                    {"message": {"content": '{"sql":"select 1","explanation":"ok"}'}}
+                ]
+            }
+
+        with mock.patch.object(api, "_connect", lambda cid: self.conn("postgres")), \
+             mock.patch.object(api, "_ai_schema_context", lambda *a, **k: ""), \
+             mock.patch.object(api, "_ai_post", side_effect=fake):
+            await api.ai_ask(
+                {
+                    "connection_id": "c1",
+                    "question": "pecahkan ikut bulan",
+                    "execute": False,
+                    "history": [
+                        {"role": "user", "content": "berapa purchase"},
+                        {"role": "assistant", "content": '{"sql":"select count(*) from purchases"}'},
+                    ],
+                }
+            )
+
+        contents = [message["content"] for message in captured["messages"]]
+        self.assertIn("berapa purchase", contents)
+        self.assertTrue(any("select count(*) from purchases" in text for text in contents))
+        self.assertEqual(contents[-1], "pecahkan ikut bulan")
+
     async def test_refuses_non_read(self):
         completion = {
             "choices": [

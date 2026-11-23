@@ -3304,16 +3304,21 @@ def _ai_schema_context(conn: dict[str, Any], schema: str, table: str, question: 
     lines = [f"Database: {conn.get('dbname') or ''}"]
     if names:
         lines.append("Tables: " + ", ".join(names))
+    lowered = question.lower()
+    tokens = set(re.findall(r"[a-z0-9_]+", lowered))
     focus = [
         row for row in tables
         if row.get("schema") == schema and row.get("name") == table
-    ]
-    if not focus:
-        lowered = question.lower()
-        focus = [
-            row for row in tables
-            if str(row.get("name") or "").lower() in lowered
-        ][:3]
+    ][:1]
+    for row in tables:
+        if len(focus) >= 4:
+            break
+        name = str(row.get("name") or "").lower()
+        if not name or any(item is row for item in focus):
+            continue
+        stem = name[:-1] if name.endswith("s") else name
+        if name in lowered or name in tokens or stem in tokens:
+            focus.append(row)
     for row in focus[:3]:
         try:
             columns = _columns(conn, row["schema"], row["name"])
@@ -3346,7 +3351,30 @@ def _ai_extract_json(text: str) -> dict[str, Any]:
         return value if isinstance(value, dict) else {}
 
 
-def _ai_request(conn: dict[str, Any], database: str, schema: str, table: str, question: str) -> dict[str, Any]:
+def _ai_history(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    messages = []
+    for item in value[-12:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        content = str(item.get("content") or "")[:4000]
+        if role in ("user", "assistant") and content.strip():
+            messages.append({"role": role, "content": content})
+    return messages
+
+
+def _ai_request(
+    conn: dict[str, Any],
+    database: str,
+    schema: str,
+    table: str,
+    question: str,
+    error: str = "",
+    previous: str = "",
+    history: Any = None,
+) -> dict[str, Any]:
     config = _load_ai_config()
     dialect = {"postgres": "PostgreSQL", "mysql": "MySQL/MariaDB", "clickhouse": "ClickHouse", "sqlite": "SQLite"}.get(_kind(conn), "SQL")
     today = datetime.date.today().isoformat()
@@ -3359,13 +3387,29 @@ def _ai_request(conn: dict[str, Any], database: str, schema: str, table: str, qu
         f"add LIMIT 500 when returning detail rows, use today's date {today} for relative dates. "
         "Use only the tables and columns listed.\n\n" + context
     )
+    messages = [{"role": "system", "content": system}]
+    messages.extend(_ai_history(history))
+    messages.append({"role": "user", "content": question})
+    if error:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": json.dumps({"sql": previous, "explanation": ""}),
+            }
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "That SQL failed with:\n" + error[:1200]
+                    + "\nReturn a corrected JSON object using only the listed columns and tables."
+                ),
+            }
+        )
     payload = {
         "model": config.get("model") or AI_DEFAULT_MODEL,
         "temperature": 0,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": question},
-        ],
+        "messages": messages,
         "response_format": {"type": "json_object"},
     }
     data = _ai_post(config, payload)
@@ -3741,13 +3785,33 @@ async def ai_ask(body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(400, "question is required")
     schema = str(body.get("schema") or "")
     table = str(body.get("table") or "")
-    planned = _ai_request(conn, str(body.get("database") or ""), schema, table, question)
+    database = str(body.get("database") or "")
+    history = body.get("history")
+    planned = _ai_request(conn, database, schema, table, question, history=history)
     if body.get("execute") is False:
         return {"sql": planned["sql"], "explanation": planned["explanation"]}
-    result = _ai_run(conn, planned["sql"])
+    retried = False
+    try:
+        result = _ai_run(conn, planned["sql"])
+    except HTTPException as exc:
+        if exc.status_code != 400:
+            raise
+        planned = _ai_request(
+            conn,
+            database,
+            schema,
+            table,
+            question,
+            error=str(exc.detail),
+            previous=planned["sql"],
+            history=history,
+        )
+        retried = True
+        result = _ai_run(conn, planned["sql"])
     return {
         "sql": planned["sql"],
         "explanation": planned["explanation"],
+        "retried": retried,
         **result,
     }
 
