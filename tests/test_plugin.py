@@ -17,6 +17,8 @@ import os
 import re
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -159,6 +161,47 @@ class TestHelpers(unittest.TestCase):
 
     def test_like_escape(self):
         self.assertEqual(api._like_escape("50%_x"), "50\\%\\_x")
+
+    def test_column_cache(self):
+        record = conn("mysql")
+        calls = []
+
+        def fake(conn_arg, schema, table):
+            calls.append((schema, table))
+            return [{"name": "id", "type": "int", "nullable": False, "default": None, "pk": True}]
+
+        api._invalidate_columns()
+        with mock.patch.object(api, "_my_columns", side_effect=fake):
+            first = api._columns(record, "db", "t")
+            second = api._columns(record, "db", "t")
+            api._invalidate_columns()
+            api._columns(record, "db", "t")
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(first, second)
+        self.assertIsNot(first, second)
+
+    def test_column_cache_coalesces_concurrent_lookups(self):
+        record = conn("postgres")
+        calls = []
+
+        def slow(conn_arg, schema, table):
+            calls.append((schema, table))
+            time.sleep(0.05)
+            return [{"name": "id"}]
+
+        api._invalidate_columns()
+        with mock.patch.object(api, "_pg_columns", side_effect=slow):
+            threads = [
+                threading.Thread(target=api._columns, args=(record, "public", "t"))
+                for _ in range(4)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(len(calls), 1)
 
     def test_csv_from(self):
         csv_text = api._csv_from(
