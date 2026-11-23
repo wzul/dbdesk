@@ -559,6 +559,19 @@ class TestAi(Base):
         self.assertIn("purchases", context)
         self.assertIn("created_on", context)
 
+    async def test_answer_without_sql(self):
+        completion = {
+            "choices": [{"message": {"content": '{"answer":"Hello!","sql":""}'}}]
+        }
+        with mock.patch.object(api, "_connect", lambda cid: self.conn("postgres")), \
+             mock.patch.object(api, "_ai_schema_context", lambda *a, **k: ""), \
+             mock.patch.object(api, "_ai_post", return_value=completion), \
+             mock.patch.object(api, "_ai_run") as run:
+            result = await api.ai_ask({"connection_id": "c1", "question": "hello"})
+        self.assertEqual(result["sql"], "")
+        self.assertEqual(result["explanation"], "Hello!")
+        run.assert_not_called()
+
     async def test_history_is_forwarded(self):
         captured = {}
 
