@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Generate a dialect-correct SELECT from the current table, enabled filters, order and limit; preview with Copy / Open in SQL.
+
 ## 0.6.1
 
 - ClickHouse: optional HTTP path and encrypted custom HTTP headers (Cloudflare Access service tokens, API gateway headers).

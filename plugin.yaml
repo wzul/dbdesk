@@ -1,6 +1,6 @@
 name: dbdesk
 title: DB Desk
-version: "0.6.1"
+version: "0.6.2"
 description: >-
   A TablePlus-style browser for PostgreSQL, MySQL/MariaDB, ClickHouse, SQLite,
   MCP query tools and HTTP query gateways inside Hermes: connections,

@@ -336,6 +336,13 @@ guna connection yang sama, termasuk SSH tunnel dan vault decrypt.
   bertanda dihantar dalam WHERE. Tekan **Enter** pada satu baris untuk apply
   baris itu (yang lain kekal ikut checkbox). Saved view simpan flag enabled.
 
+## 15b-2. Generate SQL from filters
+
+Panel **Filter** ada butang **SQL** (dan toolbar Data juga). Ia jana
+`SELECT * FROM schema.table` dengan WHERE, ORDER BY dan LIMIT semasa — hanya
+filter yang bertanda. Preview muncul: **Copy** atau **Open in SQL**. Quoting
+dan escaping ikut dialect (Postgres/MySQL/ClickHouse/SQLite).
+
 ## 15c. ClickHouse + Cloudflare Access
 
 ClickHouse guna HTTP interface, jadi Zero Trust app boleh terus connect:
