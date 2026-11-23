@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3
+
+- ClickHouse: a full `https://host[:port][/path]` in the Host field is accepted and normalized (443 + require for https); clearer request errors include the resolved URL.
+
 ## 0.6.2
 
 - Generate a dialect-correct SELECT from the current table, enabled filters, order and limit; preview with Copy / Open in SQL.

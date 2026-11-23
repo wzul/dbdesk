@@ -268,6 +268,48 @@ class TestVault(Base):
         self.assertTrue(url.startswith("https://ch.example.com:443/ch?"))
         self.assertIn("readonly=1", url)
 
+    def test_clickhouse_host_url_is_normalized(self):
+        conn = self.conn(
+            "clickhouse",
+            host="https://ch.example.com",
+            port=8123,
+            dbname="default",
+            sslmode="prefer",
+            ch_path="/",
+        )
+        url = api._ch_url(conn, True)
+        self.assertTrue(url.startswith("https://ch.example.com:443/?"), url)
+
+        conn = self.conn(
+            "clickhouse",
+            host="https://ch.example.com:8443/ch",
+            port=8123,
+            dbname="default",
+            sslmode="prefer",
+            ch_path="/",
+        )
+        url = api._ch_url(conn, True)
+        self.assertTrue(url.startswith("https://ch.example.com:8443/ch?"), url)
+
+    async def test_clickhouse_host_url_saved_normalized(self):
+        saved = await api.save_connection(
+            {
+                "kind": "clickhouse",
+                "name": "CH URL",
+                "host": "https://ch.example.com:8443/ch",
+                "port": 8123,
+                "dbname": "default",
+                "user": "default",
+                "sslmode": "prefer",
+                "ch_path": "/",
+            }
+        )
+        record = saved["connection"]
+        self.assertEqual(record["host"], "ch.example.com")
+        self.assertEqual(record["port"], 8443)
+        self.assertEqual(record["ch_path"], "/ch")
+        self.assertEqual(record["sslmode"], "require")
+
     async def test_clickhouse_headers_are_encrypted(self):
         saved = await api.save_connection(
             {
