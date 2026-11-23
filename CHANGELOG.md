@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4
+
+- ClickHouse: port 443 implies https when SSL mode is `prefer`, so Cloudflare/HTTPS endpoints do not receive a plain HTTP request.
+
 ## 0.6.3
 
 - ClickHouse: a full `https://host[:port][/path]` in the Host field is accepted and normalized (443 + require for https); clearer request errors include the resolved URL.

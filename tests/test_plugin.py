@@ -291,6 +291,16 @@ class TestVault(Base):
         url = api._ch_url(conn, True)
         self.assertTrue(url.startswith("https://ch.example.com:8443/ch?"), url)
 
+        conn = self.conn(
+            "clickhouse",
+            host="ch.example.com",
+            port=443,
+            dbname="default",
+            sslmode="prefer",
+            ch_path="/",
+        )
+        self.assertTrue(api._ch_url(conn, True).startswith("https://ch.example.com:443/?"))
+
     async def test_clickhouse_host_url_saved_normalized(self):
         saved = await api.save_connection(
             {
