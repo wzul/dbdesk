@@ -2631,7 +2631,7 @@ function ApprovalsDrawer({ approvals, onDecide, onRefresh, onClose }) {
                   jsx('div', { className: 'text-sm font-semibold', children: 'Approvals' }),
                   jsx('div', {
                     className: 'text-[11px] text-(--ui-text-tertiary)',
-                    children: `${pending.length} pending · production writes only`
+                    children: `${pending.length} pending · writes and agent actions`
                   })
                 ]
               }),
