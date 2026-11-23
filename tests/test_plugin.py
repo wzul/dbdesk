@@ -1273,7 +1273,7 @@ class TestTransports(Base):
             def read(self):
                 return b'{"columns":[{"name":"n"}],"rows":[[1]]}'
 
-        def fake_urlopen(request, timeout=0):
+        def fake_urlopen(request, timeout=0, context=None):
             seen["url"] = request.full_url
             seen["headers"] = {key.lower(): value for key, value in request.header_items()}
             seen["data"] = request.data
@@ -1309,7 +1309,7 @@ class TestTransports(Base):
             def read(self):
                 return b'{"meta":[{"name":"n","type":"UInt8"}],"data":[{"n":1}]}'
 
-        def fake_urlopen(request, timeout=0):
+        def fake_urlopen(request, timeout=0, context=None):
             seen["data"] = request.data
             seen["headers"] = {key.lower(): value for key, value in request.header_items()}
             return Response()

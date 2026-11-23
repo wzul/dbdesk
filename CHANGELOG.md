@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.5
+
+- HTTPS requests from ClickHouse and HTTP gateway connections use the bundled certifi CA store, fixing `CERTIFICATE_VERIFY_FAILED` in the packaged app.
+
 ## 0.6.4
 
 - ClickHouse: port 443 implies https when SSL mode is `prefer`, so Cloudflare/HTTPS endpoints do not receive a plain HTTP request.
