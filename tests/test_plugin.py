@@ -505,6 +505,53 @@ class TestSqlite(Base):
 
 
 
+
+# --------------------------------------------------------------------------- #
+# AI harness
+# --------------------------------------------------------------------------- #
+
+
+class TestAi(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        api._save_ai_config(
+            {
+                "base_url": "https://example.invalid/v1",
+                "model": "test",
+                "api_key_enc": api._encrypt("sk-test"),
+            }
+        )
+
+    async def test_plan_only(self):
+        completion = {
+            "choices": [
+                {"message": {"content": '{"sql":"select 1 as one","explanation":"one"}'}}
+            ]
+        }
+        with mock.patch.object(api, "_connect", lambda cid: self.conn("postgres")), \
+             mock.patch.object(api, "_ai_schema_context", lambda *a, **k: ""), \
+             mock.patch.object(api, "_ai_post", lambda *a, **k: completion):
+            result = await api.ai_ask(
+                {"connection_id": "c1", "question": "one", "execute": False}
+            )
+        self.assertEqual(result["sql"], "select 1 as one")
+        self.assertEqual(result["explanation"], "one")
+
+    async def test_refuses_non_read(self):
+        completion = {
+            "choices": [
+                {"message": {"content": '{"sql":"delete from users","explanation":"bad"}'}}
+            ]
+        }
+        with mock.patch.object(api, "_connect", lambda cid: self.conn("postgres")), \
+             mock.patch.object(api, "_ai_schema_context", lambda *a, **k: ""), \
+             mock.patch.object(api, "_ai_post", lambda *a, **k: completion):
+            with self.assertRaises(HTTPException) as ctx:
+                await api.ai_ask({"connection_id": "c1", "question": "bad", "execute": False})
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("non-read", str(ctx.exception.detail))
+
+
 # --------------------------------------------------------------------------- #
 # connection bundles
 # --------------------------------------------------------------------------- #
