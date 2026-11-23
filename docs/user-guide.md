@@ -326,6 +326,16 @@ Plugin daftar dua tool read-only untuk agent:
 Toolset `dbdesk` perlu ada dalam `platform_toolsets` (cli/telegram). Agent
 guna connection yang sama, termasuk SSH tunnel dan vault decrypt.
 
+## 15b. Structure grid & filters
+
+- Tab **Schema** kini papar structure grid: `#`, column, type, charset,
+  collation, nullable, default, extra, foreign key, comment, plus grid index
+  (`index_name`, algorithm, unique, column). DDL ada pada butang **DDL**.
+- Panel **Filter** ialah senarai: setiap baris ada checkbox, column/operator/
+  value, **Apply**, remove. **Apply all** hidupkan semua; hanya baris yang
+  bertanda dihantar dalam WHERE. Tekan **Enter** pada satu baris untuk apply
+  baris itu (yang lain kekal ikut checkbox). Saved view simpan flag enabled.
+
 ## 16. Keselamatan
 
 - Password **AES-GCM** dalam `plugin-data/dbdesk/connections.json`; key dalam

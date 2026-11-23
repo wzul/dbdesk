@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Schema tab is a structure grid (columns with charset, collation, nullable, default, extra, FK, comment; index grid) instead of a DDL block; DDL moved to a button.
+- Multi-row filter panel with per-row enable checkbox, Apply, Apply all and disabled-filter skipping in WHERE.
+- SQL toolbar: Save / Saved query buttons.
+- Backup & restore endpoints for connections + saved views + saved queries (optional encrypted passwords).
+- Preference storage for notifications and appearance.
+
 ## 0.5.0
 
 - **Multi-database AI agent**: `/ai/catalog` + `/ai/agent`; the agent inspects schemas on demand, plans one read-only statement per database (max 3) and a SQLite join.
