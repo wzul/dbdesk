@@ -4249,7 +4249,7 @@ function AiPanel({ connectionId, database, schema, table, onClose, onUseSql }) {
 }
 
 
-export function DbDesk({ onHome, startNew = false, editConnectionId = '', initialDraft = null } = {}) {
+export function DbDesk({ onHome, startNew = false, editConnectionId = '', initialDraft = null, onSettings } = {}) {
   const [connections, setConnections] = useState([])
   const [loaded, setLoaded] = useState(false)
   const [activeId, setActiveId] = useState(readActive)
@@ -5610,6 +5610,16 @@ export function DbDesk({ onHome, startNew = false, editConnectionId = '', initia
               })
             : null,
           jsx('div', { key: 'sp', className: 'flex-1' }),
+          onSettings
+            ? jsx(Button, {
+                key: 'settings',
+                variant: 'ghost',
+                size: 'sm',
+                title: 'Settings (⌘,)',
+                onClick: onSettings,
+                children: jsx(Codicon, { name: 'settings-gear' })
+              })
+            : null,
           jsx(Button, {
             key: 'ai',
             variant: aiOpen ? 'secondary' : 'ghost',
