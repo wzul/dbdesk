@@ -255,6 +255,19 @@ class TestVault(Base):
         with self.assertRaises(HTTPException):
             api._parse_ch_headers("Host: evil", strict=True)
 
+    def test_clickhouse_default_user_agent_and_override(self):
+        conn = self.conn("clickhouse", user="u", password="p", ch_headers="")
+        headers = api._ch_headers(conn)
+        self.assertIn("Mozilla/5.0", headers["User-Agent"])
+        self.assertEqual(headers["X-ClickHouse-User"], "u")
+
+        conn["ch_headers"] = "user-agent: Custom/1.0\nCF-Access-Client-Id: id"
+        headers = api._ch_headers(conn)
+        user_agents = [key for key in headers if key.lower() == "user-agent"]
+        self.assertEqual(user_agents, ["user-agent"])
+        self.assertEqual(headers["user-agent"], "Custom/1.0")
+        self.assertEqual(headers["CF-Access-Client-Id"], "id")
+
     def test_clickhouse_url_path(self):
         conn = self.conn(
             "clickhouse",

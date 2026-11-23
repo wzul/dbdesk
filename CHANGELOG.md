@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.6
+
+- ClickHouse/HTTP requests send a browser User-Agent by default, avoiding Cloudflare Bot Fight Mode error 1010; custom `User-Agent` headers override it case-insensitively.
+
 ## 0.6.5
 
 - HTTPS requests from ClickHouse and HTTP gateway connections use the bundled certifi CA store, fixing `CERTIFICATE_VERIFY_FAILED` in the packaged app.
