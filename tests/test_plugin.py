@@ -559,6 +559,72 @@ class TestAi(Base):
         self.assertIn("purchases", context)
         self.assertIn("created_on", context)
 
+    async def test_ask_payload_has_no_connection_secret(self):
+        saved = await api.save_connection(
+            {
+                "kind": "postgres",
+                "name": "secret-db",
+                "host": "db.example.com",
+                "port": 5432,
+                "dbname": "app",
+                "user": "app",
+                "password": "sup3rsecret",
+            }
+        )
+        cid = saved["connection"]["id"]
+        captured = {}
+
+        def fake(config, payload):
+            captured.update(payload)
+            return {"choices": [{"message": {"content": '{"sql":"select 1","explanation":"x"}'}}]}
+
+        with mock.patch.object(api, "_connect", lambda cid: api._get(cid)), \
+             mock.patch.object(api, "_ai_schema_context", lambda *a, **k: ""), \
+             mock.patch.object(api, "_ai_post", side_effect=fake):
+            await api.ai_ask({"connection_id": cid, "question": "users?", "execute": False})
+
+        payload = json.dumps(captured)
+        self.assertNotIn("sup3rsecret", payload)
+        self.assertNotIn("password", payload.lower())
+
+    async def test_ai_setup_sanitizes_secrets(self):
+        captured = {}
+
+        def fake(config, payload):
+            captured.update(payload)
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "answer": "Use this.",
+                                    "draft": {
+                                        "kind": "mysql",
+                                        "host": "db.example.com",
+                                        "port": "3306",
+                                        "password": "sup3rsecret",
+                                        "http_headers": "Authorization: Bearer x",
+                                        "tunnel_env": "AWS_SECRET_ACCESS_KEY=x",
+                                    },
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+        with mock.patch.object(api, "_ai_post", side_effect=fake):
+            result = await api.ai_setup({"question": "connect to mysql"})
+
+        self.assertEqual(result["draft"]["host"], "db.example.com")
+        self.assertEqual(result["draft"]["port"], 3306)
+        self.assertNotIn("password", result["draft"])
+        self.assertNotIn("http_headers", result["draft"])
+        self.assertNotIn("tunnel_env", result["draft"])
+        self.assertNotIn("sup3rsecret", json.dumps(result))
+        self.assertNotIn("sup3rsecret", json.dumps(captured))
+
     async def test_answer_without_sql(self):
         completion = {
             "choices": [{"message": {"content": '{"answer":"Hello!","sql":""}'}}]
