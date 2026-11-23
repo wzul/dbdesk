@@ -504,6 +504,77 @@ class TestSqlite(Base):
         self.assertEqual((await api.connection_databases(record["id"]))["databases"], [{"name": "main", "label": ""}])
 
 
+
+# --------------------------------------------------------------------------- #
+# connection bundles
+# --------------------------------------------------------------------------- #
+
+
+class TestBundles(Base):
+    async def _save(self) -> str:
+        saved = await api.save_connection(
+            {
+                "kind": "postgres",
+                "name": "Imported PG",
+                "host": "127.0.0.1",
+                "port": 5432,
+                "dbname": "demo",
+                "user": "u",
+                "password": "secret",
+                "readonly": True,
+            }
+        )
+        return saved["connection"]["id"]
+
+    async def test_roundtrip_with_secrets(self):
+        conn_id = await self._save()
+        exported = await api.export_connections(
+            {"ids": [conn_id], "include_secrets": True, "passphrase": "correct horse"}
+        )
+        self.assertTrue(exported["encrypted"])
+        self.assertEqual(exported["count"], 1)
+
+        with self.assertRaises(HTTPException):
+            await api.import_connections(
+                {"bundle": exported["bundle"], "passphrase": "wrong", "preview": True}
+            )
+
+        preview = await api.import_connections(
+            {"bundle": exported["bundle"], "passphrase": "correct horse", "preview": True}
+        )
+        self.assertEqual(preview["count"], 1)
+        self.assertTrue(preview["connections"][0]["has_password"])
+
+        await api.delete_connection(conn_id)
+        result = await api.import_connections(
+            {"bundle": exported["bundle"], "passphrase": "correct horse"}
+        )
+        self.assertEqual(result["added"], 1)
+        rows = (await api.list_connections())["connections"]
+        self.assertEqual(len(rows), 1)
+        record = api._get(rows[0]["id"])
+        self.assertEqual(record["name"], "Imported PG")
+        self.assertEqual(record["password"], "secret")
+        self.assertTrue(record["readonly"])
+
+    async def test_export_without_secrets(self):
+        conn_id = await self._save()
+        exported = await api.export_connections({"ids": [conn_id], "include_secrets": False})
+        self.assertFalse(exported["encrypted"])
+        self.assertNotIn("secret", exported["bundle"])
+        result = await api.import_connections({"bundle": exported["bundle"]})
+        self.assertEqual(result["added"], 1)
+        rows = (await api.list_connections())["connections"]
+        self.assertEqual(len(rows), 2)
+
+    async def test_requires_passphrase_for_secrets(self):
+        conn_id = await self._save()
+        with self.assertRaises(HTTPException):
+            await api.export_connections(
+                {"ids": [conn_id], "include_secrets": True, "passphrase": "short"}
+            )
+
+
 # --------------------------------------------------------------------------- #
 # endpoints
 # --------------------------------------------------------------------------- #
