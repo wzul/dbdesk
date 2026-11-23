@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0
+
+- **Multi-database AI agent**: `/ai/catalog` + `/ai/agent`; the agent inspects schemas on demand, plans one read-only statement per database (max 3) and a SQLite join.
+- Result sets are joined locally in in-memory SQLite; only schema, SQL, row counts and errors reach the provider.
+- AI panel scope bar (all / current / none), per-source SQL blocks, local-join block, merged result and step log.
+- Per-connection **AI can see this schema** and **AI can run read-only queries** switches; inspect-only mode.
+- Agent reads (`ai_read`) go to the audit log; no production notification for reads.
+
+## 0.4.0
+
+- AI setup assistant on the picker: describe a database and get a field-by-field draft; secrets are stripped server-side.
+- Settings (⌘,): updates, native notifications + test, AI provider, data path.
+
+## 0.3.5
+
+- Conversational replies without SQL.
+
+## 0.3.4
+
+- Cursor-style AI chat panel: thread, thought line, SQL block, composer.
+
+## 0.3.3
+
+- AI chat with history (multi-turn), read-only SQL.
+
 ## 0.2.0
 
 - **SQLite** connections: open a local `.db` file (path instead of host/port), read-only via `mode=ro`.

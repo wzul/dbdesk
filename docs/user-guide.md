@@ -291,7 +291,30 @@ Long-press cell buka menu **Edit / Copy value / Copy row / Follow FK**.
 ![Mobile sidebar](img/12-mobile-sidebar.png)
 ![Mobile drawer](img/13-mobile-drawer.png)
 
-## 14. Agent tools
+## 14. AI chat (multi-database)
+
+Butang **AI** di header buka chat di kanan. Ia guna endpoint OpenAI-compatible
+(base URL + model + API key dalam **Settings / AI settings**) dan menjalankan
+SQL read-only sahaja.
+
+- **Scope bar** di bawah header: default **All databases** (semua connection
+  yang AI-enabled). Boleh pilih subset, **Current only** atau **None**.
+- **Soalan merentas DB**: agent minta schema yang belum dilihat, kemudian
+  pulangkan satu statement read-only per DB (max 3) + join SQL. DB Desk
+  jalankan setiap statement pada DB asalnya, muat result ke SQLite in-memory
+  dan buat join **secara lokal**. Hanya schema, SQL, row count dan error pergi
+  ke provider — **rows tak pernah dihantar**.
+- Setiap jawapan tunjuk blok SQL per source (**Copy SQL**, atau **Open in SQL**
+  untuk connection semasa), blok **Local join**, jadual gabungan dan log langkah.
+- **Follow-up** kekal dalam thread (SQL/penjelasan sebelum ini dihantar).
+- Sapaan/non-data dibalas terus tanpa SQL.
+- **Switch per connection** dalam form connection:
+  - **AI can see this schema** — off: connection tersembunyi dari agent.
+  - **AI can run read-only queries** — off: inspect-only (agent boleh lihat
+    schema, tak boleh query).
+- Statement agent masuk **audit log** (`ai_read`).
+
+## 15. Agent tools
 
 Plugin daftar dua tool read-only untuk agent:
 
@@ -303,7 +326,7 @@ Plugin daftar dua tool read-only untuk agent:
 Toolset `dbdesk` perlu ada dalam `platform_toolsets` (cli/telegram). Agent
 guna connection yang sama, termasuk SSH tunnel dan vault decrypt.
 
-## 15. Keselamatan
+## 16. Keselamatan
 
 - Password **AES-GCM** dalam `plugin-data/dbdesk/connections.json`; key dalam
   `vault.key` (0600). Kedua-dua tak dihantar ke UI.
@@ -314,7 +337,7 @@ guna connection yang sama, termasuk SSH tunnel dan vault decrypt.
 - Ini guardrail, bukan sandbox — sesiapa dengan akses webapp + connection boleh
   query DB yang dibenarkan.
 
-## 16. Test
+## 17. Test
 
 ```bash
 ./tests/run.sh
@@ -322,11 +345,11 @@ guna connection yang sama, termasuk SSH tunnel dan vault decrypt.
 PYTHON=/path/to/python HERMES_ROOT=/usr/local/lib/hermes-agent ./tests/run.sh
 ```
 
-43 test backend/agent (helper SQL, vault, migration, builders, endpoint
+70 test backend/agent (helper SQL, vault, migration, builders, endpoint
 preview/guard, query/views, agent tools). Tiada DB server diperlukan — dialect
 dimock, storage guna temp home.
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 | Masalah | Semak |
 |---|---|

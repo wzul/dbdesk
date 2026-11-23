@@ -685,6 +685,176 @@ class TestAi(Base):
 
 
 # --------------------------------------------------------------------------- #
+# multi-database agent
+# --------------------------------------------------------------------------- #
+
+
+class TestMultiDbAgent(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        api._save_ai_config(
+            {
+                "base_url": "https://example.invalid/v1",
+                "model": "test",
+                "api_key_enc": api._encrypt("sk-test"),
+            }
+        )
+
+    async def _save(self, name: str, kind: str = "postgres", **over) -> str:
+        body = {
+            "kind": kind,
+            "name": name,
+            "host": "db.example.com",
+            "port": 5432,
+            "dbname": name,
+            "user": "app",
+            "password": "sup3rsecret",
+        }
+        if kind == "mysql":
+            body["port"] = 3306
+        body.update(over)
+        saved = await api.save_connection(body)
+        return saved["connection"]["id"]
+
+    async def test_catalog_lists_enabled_and_flags(self):
+        first = await self._save("app")
+        second = await self._save("analytics", kind="mysql", ai_query=False)
+        await self._save("private", ai_schema=False)
+
+        catalog = (await api.ai_catalog())["connections"]
+        ids = [entry["id"] for entry in catalog]
+        self.assertIn(first, ids)
+        self.assertIn(second, ids)
+        self.assertEqual(len(catalog), 2)
+        entry = next(item for item in catalog if item["id"] == second)
+        self.assertFalse(entry["query"])
+        self.assertNotIn("host", entry)
+        self.assertNotIn("user", entry)
+        self.assertNotIn("sup3rsecret", json.dumps(catalog))
+
+    async def test_describe_then_local_join(self):
+        first = await self._save("app")
+        second = await self._save("analytics", kind="mysql")
+        responses = [
+            {"action": "describe", "requests": [{"connection": second, "tables": ["events"]}]},
+            {
+                "action": "run",
+                "sources": [
+                    {"connection": first, "sql": "select email from users"},
+                    {"connection": second, "sql": "select email from events"},
+                ],
+                "join_sql": (
+                    "select distinct src_0.email from src_0 "
+                    "join src_1 on src_0.email = src_1.email"
+                ),
+                "explanation": "Users present in both systems.",
+            },
+        ]
+        posted = []
+
+        def fake(config, payload):
+            posted.append(payload)
+            return {
+                "choices": [{"message": {"content": json.dumps(responses[len(posted) - 1])}}]
+            }
+
+        def source(conn, sql):
+            rows = [["a@x"], ["b@x"]] if conn["id"] == first else [["b@x"]]
+            return {
+                "connection": conn["id"],
+                "name": conn["name"],
+                "kind": api._kind(conn),
+                "sql": sql,
+                "columns": [{"name": "email", "type": "text"}],
+                "rows": rows,
+                "truncated": False,
+                "duration_ms": 2,
+            }
+
+        with mock.patch.object(api, "_ai_post", side_effect=fake), \
+             mock.patch.object(api, "_ai_describe", return_value="COLUMNS events.email text"), \
+             mock.patch.object(api, "_ai_agent_source", side_effect=source):
+            result = api._ai_agent(
+                {
+                    "question": "who is in both?",
+                    "connection_ids": [first, second],
+                    "connection_id": first,
+                }
+            )
+
+        self.assertEqual(result["rows"], [["b@x"]])
+        self.assertEqual(len(result["sources"]), 2)
+        self.assertTrue(result["join_sql"])
+        self.assertIn("inspected analytics", result["steps"])
+        second = json.dumps(posted[1])
+        self.assertNotIn("a@x", second)
+        self.assertNotIn("b@x", second)
+        prompt = json.dumps(posted[0])
+        self.assertIn("analytics", prompt)
+        self.assertIn(first, prompt)
+        self.assertNotIn("sup3rsecret", prompt)
+        self.assertNotIn("db.example.com", prompt)
+
+    async def test_inspect_only_connection_cannot_run(self):
+        first = await self._save("app")
+        await self._save("warehouse", ai_query=False)
+        plan = {
+            "action": "run",
+            "sources": [{"connection": "missing", "sql": "select 1"}],
+            "explanation": "x",
+        }
+        conns = (await api.list_connections())["connections"]
+        warehouse = next(c["id"] for c in conns if c["name"] == "warehouse")
+        plan["sources"] = [{"connection": warehouse, "sql": "select 1 as one"}]
+        completion = {"choices": [{"message": {"content": json.dumps(plan)}}]}
+
+        with mock.patch.object(api, "_ai_post", return_value=completion):
+            with self.assertRaises(HTTPException) as ctx:
+                api._ai_agent(
+                    {"question": "one", "connection_ids": [first, warehouse], "connection_id": first}
+                )
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertIn("inspect-only", str(ctx.exception.detail))
+
+    async def test_empty_scope_is_refused(self):
+        first = await self._save("app")
+        completion = {"choices": [{"message": {"content": '{"action":"answer","answer":"hi"}'}}]}
+        with mock.patch.object(api, "_ai_post", return_value=completion):
+            with self.assertRaises(HTTPException) as ctx:
+                api._ai_agent({"question": "hi", "connection_ids": [], "connection_id": first})
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("AI-enabled", str(ctx.exception.detail))
+
+    async def test_local_join_matches_numeric_affinity(self):
+        left = {
+            "columns": [{"name": "id", "type": "integer"}, {"name": "name", "type": "text"}],
+            "rows": [[5, "a"], [6, "b"]],
+        }
+        right = {
+            "columns": [{"name": "id", "type": "varchar"}, {"name": "plan", "type": "varchar"}],
+            "rows": [["5", "pro"]],
+        }
+        result = api._ai_local_join(
+            [left, right],
+            "select src_0.name, src_1.plan from src_0 join src_1 on src_0.id = src_1.id",
+        )
+        self.assertEqual(result["rows"], [["a", "pro"]])
+        self.assertEqual([column["name"] for column in result["columns"]], ["name", "plan"])
+
+    def test_local_join_rejects_writes(self):
+        left = {"columns": [{"name": "id", "type": "integer"}], "rows": [[1]]}
+        with self.assertRaises(HTTPException) as ctx:
+            api._ai_local_join([left], "delete from src_0")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_unique_columns(self):
+        names = api._ai_unique_names(
+            [{"name": "id"}, {"name": "id"}, {"name": "id"}, {"name": "name"}]
+        )
+        self.assertEqual(names, ["id", "id_2", "id_3", "name"])
+
+
+# --------------------------------------------------------------------------- #
 # connection bundles
 # --------------------------------------------------------------------------- #
 
