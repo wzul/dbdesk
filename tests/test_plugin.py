@@ -1656,5 +1656,72 @@ class TestRedis(Base):
         self.assertEqual(self.redis.get("greeting"), b"hello")
 
 
+
+
+class TestColumnFeatures(Base):
+    def test_public_hides_decryption_key(self):
+        record = self.conn(decrypt_key_enc=api._encrypt("super-secret"), decrypt_columns="card")
+        public = api._public(record)
+        self.assertTrue(public["decrypt_key_set"])
+        self.assertNotIn("decrypt_key", public)
+        self.assertNotIn("decrypt_key_enc", public)
+
+    def test_decrypts_gcm_envelope(self):
+        import base64
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        key = b"0123456789abcdef0123456789abcdef"
+        iv = os.urandom(12)
+        ciphertext = AESGCM(key).encrypt(iv, b"123-456-789", None)
+        envelope = json.dumps(
+            {
+                "p": base64.b64encode(ciphertext).decode(),
+                "h": {"iv": base64.b64encode(iv).decode()},
+            }
+        )
+        self.assertEqual(api._decrypt_payload(envelope, [key], "auto"), "123-456-789")
+
+    def test_timezone_filter_conversion(self):
+        conn = {"display_tz": "Asia/Kuala_Lumpur", "storage_tz": "UTC"}
+        sql = api._where_clause(
+            "postgres",
+            [
+                {
+                    "mode": "column",
+                    "column": "created_at",
+                    "op": "eq",
+                    "value": "2023-05-23 15:05:34.863445",
+                }
+            ],
+            [{"name": "created_at", "type": "timestamp without time zone"}],
+            conn,
+        )
+        self.assertIn("2023-05-23 07:05:34.863445", sql)
+
+    def test_apply_decryption_rows(self):
+        import base64
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        key = b"0123456789abcdef0123456789abcdef"
+        iv = os.urandom(12)
+        ciphertext = AESGCM(key).encrypt(iv, b"4111", None)
+        envelope = json.dumps(
+            {
+                "p": base64.b64encode(ciphertext).decode(),
+                "h": {"iv": base64.b64encode(iv).decode()},
+            }
+        )
+        record = self.conn(
+            decrypt_key_enc=api._encrypt(key.decode()),
+            decrypt_columns="card",
+        )
+        result = api._apply_decryption(
+            record,
+            {"columns": [{"name": "card", "type": "varchar"}], "rows": [[envelope]]},
+        )
+        self.assertEqual(result["decrypted_rows"], [["4111"]])
+        self.assertEqual(result["decrypted_columns"], ["card"])
+
+
 if __name__ == "__main__":
     unittest.main()

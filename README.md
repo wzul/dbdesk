@@ -8,6 +8,27 @@ log, all from the Hermes Desktop/Webapp.
 
 ![DB Desk data grid](docs/img/02-data-grid.png)
 
+## Beyond TablePlus
+
+DB Desk keeps the TablePlus workflow — connections, schema tree, data grid,
+tabs, filters, SQL runner — and adds three things you normally need a second
+tool for:
+
+- **Encrypted columns, revealed in place.** Save an AES key per connection
+  (raw key, `base64:` Laravel `APP_KEY`, or passphrase), list the encrypted
+  columns, and DB Desk decrypts Laravel and `{"p": …, "h": {"iv": …}}`
+  envelopes into the grid (AES-256-GCM / AES-256-CBC, auto-detected). Toggle
+  reveal/hide without a single `pgp_sym_decrypt` call. The key is AES-GCM
+  encrypted at rest, never returned by the API, and never sent to the AI.
+- **Timezone-aware browsing.** Pick a display timezone (`Asia/Kuala_Lumpur`)
+  and how naive timestamps are stored (`UTC` by default). `timestamp without
+  time zone` and `timestamptz` values render in your timezone, and column
+  filter values are converted back to the storage timezone, so searching
+  `2026-11-24 09:00` just works.
+- **NoSQL next to SQL.** MongoDB collections/documents and Redis/Valkey keys,
+  value drawer and command console share the same window, read-only guards,
+  production approvals and audit log.
+
 ## Features
 
 - **Connections** — PostgreSQL, MySQL/MariaDB, ClickHouse, **SQLite** (a local
@@ -37,6 +58,8 @@ log, all from the Hermes Desktop/Webapp.
   connections require an explicit confirmation **and approval** (Telegram notice
   + Approvals drawer); sensitive WordPress tables get an extra warning; every
   write is audited (`audit.jsonl`, 0600).
+- **SQL tabs** — each query opens its own tab with independent text and
+  results (⌘2 / ⌘T), like TablePlus.
 - **SQL** — autocomplete (keywords, tables, referenced tables' columns),
   formatter, history, saved queries, CSV, SVG bar/line charts.
 - **Schema** — DDL view (`\d+`, `SHOW CREATE TABLE`, `sqlite_master.sql`),
