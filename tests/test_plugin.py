@@ -333,6 +333,21 @@ class TestVault(Base):
         self.assertEqual(record["ch_path"], "/ch")
         self.assertEqual(record["sslmode"], "require")
 
+    async def test_mariadb_flavor_is_stored(self):
+        saved = await api.save_connection(
+            {
+                "kind": "mysql",
+                "flavor": "mariadb",
+                "name": "Maria",
+                "host": "127.0.0.1",
+                "port": 3306,
+                "dbname": "app",
+                "user": "root",
+            }
+        )
+        self.assertEqual(saved["connection"]["flavor"], "mariadb")
+        self.assertEqual(api._get(saved["connection"]["id"])["flavor"], "mariadb")
+
     async def test_clone_connection_keeps_secret(self):
         saved = await api.save_connection(
             {
