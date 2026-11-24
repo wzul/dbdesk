@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install fastapi cryptography
+      - run: pip install fastapi cryptography pymongo redis mongomock fakeredis
       - run: PYTHON=python ./tests/run.sh
 
   desktop:

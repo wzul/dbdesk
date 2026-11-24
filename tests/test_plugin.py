@@ -1520,5 +1520,141 @@ class TestAgent(unittest.TestCase):
         self.assertIn("required", payload["error"])
 
 
+# --------------------------------------------------------------------------- #
+# MongoDB / Redis adapters (optional drivers)
+# --------------------------------------------------------------------------- #
+
+try:  # pragma: no cover - optional test dependencies
+    import mongomock  # noqa: E402
+except Exception:
+    mongomock = None
+
+try:  # pragma: no cover - optional test dependencies
+    import fakeredis  # noqa: E402
+except Exception:
+    fakeredis = None
+
+
+@unittest.skipIf(mongomock is None, "mongomock is not installed")
+class TestMongo(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        self.mongo = mongomock.MongoClient()
+        self.mongo.db.users.insert_many(
+            [
+                {"name": "Ali", "age": 30, "tags": ["a"]},
+                {"name": "Siti", "age": 25},
+            ]
+        )
+        self.record = self.conn(
+            "mongodb",
+            dbname="db",
+            host="127.0.0.1",
+            port=27017,
+            user="u",
+            readonly=False,
+        )
+        self.patch = mock.patch.object(api, "_mongo_client", lambda record: self.mongo)
+        self.patch.start()
+
+    def tearDown(self) -> None:
+        self.patch.stop()
+        super().tearDown()
+
+    def test_tree_columns_indexes(self):
+        tree = api._mongo_tree(self.record)
+        self.assertEqual([row["name"] for row in tree], ["users"])
+        columns = api._mongo_columns(self.record, "db", "users")
+        self.assertEqual(columns[0]["name"], "_id")
+        self.assertTrue(columns[0]["pk"])
+        self.assertEqual(
+            [row["name"] for row in api._mongo_indexes(self.record, "db", "users")], ["_id_"]
+        )
+
+    def test_rows_filter_and_query(self):
+        rows = api._mongo_rows(
+            self.record,
+            "db",
+            "users",
+            10,
+            0,
+            "age",
+            "asc",
+            [{"mode": "column", "column": "name", "op": "contains", "value": "li"}],
+        )
+        index = [column["name"] for column in rows["columns"]].index("name")
+        self.assertEqual([row[index] for row in rows["rows"]], ["Ali"])
+
+        result = api._mongo_query(
+            self.record,
+            json.dumps({"collection": "users", "find": {"age": {"$gt": 26}}}),
+            10,
+            True,
+        )
+        index = [column["name"] for column in result["columns"]].index("name")
+        self.assertEqual([row[index] for row in result["rows"]], ["Ali"])
+
+    def test_writes_and_production_approval(self):
+        inserted = api._mongo_insert_documents(
+            self.record, {"collection": "users", "document": {"name": "Abu", "age": 40}}
+        )
+        self.assertEqual(inserted["inserted"], 1)
+        updated = api._mongo_update_documents(
+            self.record,
+            {"collection": "users", "filter": {"name": "Abu"}, "changes": {"age": 41}},
+        )
+        self.assertEqual(updated["modified"], 1)
+        deleted = api._mongo_delete_documents(
+            self.record, {"collection": "users", "filter": {"name": "Abu"}}
+        )
+        self.assertEqual(deleted["deleted"], 1)
+
+        production = self.conn(production=True)
+        with self.assertRaises(HTTPException) as ctx:
+            api._mongo_update_documents(
+                production,
+                {"collection": "users", "filter": {"name": "Ali"}, "changes": {"age": 31}},
+            )
+        self.assertEqual(ctx.exception.status_code, 403)
+
+
+@unittest.skipIf(fakeredis is None, "fakeredis is not installed")
+class TestRedis(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        self.redis = fakeredis.FakeRedis(decode_responses=False)
+        self.redis.set("user:1", "Ali")
+        self.redis.hset("user:2", mapping={"name": "Siti"})
+        self.redis.rpush("list:1", "a", "b")
+        self.record = self.conn("redis", dbname="0", host="127.0.0.1", port=6379, redis_db=0)
+        self.patch = mock.patch.object(
+            api, "_redis_client", lambda record, database=None: self.redis
+        )
+        self.patch.start()
+
+    def tearDown(self) -> None:
+        self.patch.stop()
+        super().tearDown()
+
+    def test_tree_and_rows(self):
+        tree = api._redis_tree(self.record)
+        self.assertEqual(tree[0]["name"], "keys")
+        rows = api._redis_rows(self.record, "db0", "keys", 10, 0, "", "", None)
+        self.assertEqual(
+            sorted(row[0] for row in rows["rows"]), ["list:1", "user:1", "user:2"]
+        )
+        self.assertEqual([column["name"] for column in rows["columns"]], ["key", "type", "ttl", "size"])
+
+    def test_commands_and_guard(self):
+        result = api._redis_query(self.record, "HGETALL user:2", 10, True)
+        self.assertEqual(result["rows"], [["name", "Siti"]])
+        with self.assertRaises(HTTPException) as ctx:
+            api._redis_query(self.record, "SET nope 1", 10, True)
+        self.assertEqual(ctx.exception.status_code, 403)
+        written = api._redis_command_write(self.record, {"command": "SET greeting hello"})
+        self.assertTrue(written["ok"])
+        self.assertEqual(self.redis.get("greeting"), b"hello")
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()

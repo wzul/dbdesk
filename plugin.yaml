@@ -1,23 +1,7 @@
 name: dbdesk
-title: DB Desk
-version: "0.6.16"
-description: >-
-  A TablePlus-style browser for PostgreSQL, MySQL/MariaDB, ClickHouse, SQLite,
-  MCP query tools and HTTP query gateways inside Hermes: connections,
-  SSH/custom tunnels, typed inline editing, SQL runner, CSV import/export,
-  schema diff/index tools, saved views and a write audit log. Disclosure —
-  executes SQL with the credentials you configure and runs custom tunnel
-  commands as shell commands; connection secrets are stored under
-  <hermes home>/plugin-data/dbdesk (AES-GCM, 0600); no telemetry; agent tools
-  are read-only.
-author: "Wan Zulkarnain"
-tier: community
-category: tools
-requires_hermes: ">=0.22.0"
-platforms:
-  - linux
-  - macos
-  - windows
+version: "0.7.0"
+description: "DB Desk — a TablePlus-style browser for PostgreSQL, MySQL/MariaDB, ClickHouse, SQLite, MongoDB, Redis/Valkey, MongoDB and Redis/Valkey: connections, SSH tunnels, schema tree, data grid with typed editors, SQL runner, CSV import/export, saved views and read-only agent tools."
+author: "Hermes (Wan)"
 provides_tools:
   - db_connections
   - db_query

@@ -1,8 +1,8 @@
 # DB Desk
 
 A TablePlus-style database browser that runs inside **Hermes** — PostgreSQL,
-MySQL/MariaDB, ClickHouse and SQLite, plus MCP servers and HTTP query gateways
-(including Cloudflare Zero Trust). Connections, a schema tree, typed inline editing, a SQL
+MySQL/MariaDB, ClickHouse, SQLite, MongoDB and Redis/Valkey, plus MCP servers
+and HTTP query gateways (including Cloudflare Zero Trust). Connections, a schema tree, typed inline editing, a SQL
 runner, CSV import/export, saved views, schema diff/index tools and a full audit
 log, all from the Hermes Desktop/Webapp.
 
@@ -11,9 +11,20 @@ log, all from the Hermes Desktop/Webapp.
 ## Features
 
 - **Connections** — PostgreSQL, MySQL/MariaDB, ClickHouse, **SQLite** (a local
-  `.db` file, read-only via `mode=ro`), **MCP query tools** and **HTTP query
+  `.db` file, read-only via `mode=ro`), **MongoDB** (SRV, auth source),
+  **Redis/Valkey** (database index), **MCP query tools** and **HTTP query
   gateways**; optional **SSH tunnel** or **custom tunnel command** (SSM port
   forwarding, `cloudflared access tcp`, ...).
+- **MongoDB** — collection tree, document grid, JSON filter/query, inline field
+  editing, insert/delete, indexes and sampled field types; production writes
+  ask for approval.
+- **Redis/Valkey** — logical-database tree, key browser (key/type/ttl/size),
+  value drawer for strings, hashes, lists, sets, sorted sets and streams, and a
+  command console. Read-only connections refuse writes; production writes ask
+  for approval.
+- **Optional drivers** — `pip install pymongo redis` enables MongoDB and Redis
+  (the standalone app bundles them). Without them the SQL adapters keep
+  working and the new kinds show a clear install message.
 - **Secrets** — passwords encrypted with AES-GCM; key in `vault.key` (0600);
   never returned to the UI. Custom tunnel env and HTTP headers stay in the
   0600 connection store.
