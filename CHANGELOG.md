@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.8
+
+- Data toolbar is one compact row: secondary actions are icon-only and Export/Copy/Chart/Import live in a More menu; no wrapping.
+
 ## 0.6.7
 
 - ClickHouse header edit form lists saved header names (values stay encrypted) and states that new lines replace the saved set.
