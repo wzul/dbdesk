@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.10
+
+- Header gives the connection name `flex-1` (no more "C.."), hides the host line below 2xl, and drops the competing spacer; the full name stays readable.
+
 ## 0.6.9
 
 - Connection rail: open connections as a compact icon rail; click to switch, right-click to remove, `+` opens the picker.
