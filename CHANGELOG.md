@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.12
+
+- Table tabs are flat underline tabs instead of boxed chips.
+- Navigating between tables replaces the current tab while it is pristine (no filters/sort/limit/column changes); a new tab opens only after a modification.
+
 ## 0.6.11
 
 - Right-click a connection → **Clone connection**: duplicates it with encrypted credentials, flags and settings, named "(copy)".
