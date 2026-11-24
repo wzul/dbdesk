@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.11
+
+- Right-click a connection → **Clone connection**: duplicates it with encrypted credentials, flags and settings, named "(copy)".
+
 ## 0.6.10
 
 - Header gives the connection name `flex-1` (no more "C.."), hides the host line below 2xl, and drops the competing spacer; the full name stays readable.

@@ -333,6 +333,30 @@ class TestVault(Base):
         self.assertEqual(record["ch_path"], "/ch")
         self.assertEqual(record["sslmode"], "require")
 
+    async def test_clone_connection_keeps_secret(self):
+        saved = await api.save_connection(
+            {
+                "kind": "postgres",
+                "name": "Clone me",
+                "host": "db.example.com",
+                "port": 5432,
+                "dbname": "app",
+                "user": "app",
+                "password": "clonepass",
+                "production": True,
+                "readonly": True,
+            }
+        )
+        cid = saved["connection"]["id"]
+        cloned = (await api.clone_connection(cid))["connection"]
+        self.assertNotEqual(cloned["id"], cid)
+        self.assertEqual(cloned["name"], "Clone me (copy)")
+        self.assertTrue(cloned["production"])
+        self.assertTrue(cloned["readonly"])
+        self.assertNotIn("password", cloned)
+        self.assertEqual(api._get(cloned["id"])["password"], "clonepass")
+        self.assertEqual(len(api._load()), 2)
+
     async def test_clickhouse_headers_are_encrypted(self):
         saved = await api.save_connection(
             {
