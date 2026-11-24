@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.9
+
+- Connection rail: open connections as a compact icon rail; click to switch, right-click to remove, `+` opens the picker.
+- Open database dialog from the header/rail database icon: search databases, Open or New.
+- The full connections list no longer takes sidebar space.
+
 ## 0.6.8
 
 - Data toolbar is one compact row: secondary actions are icon-only and Export/Copy/Chart/Import live in a More menu; no wrapping.
