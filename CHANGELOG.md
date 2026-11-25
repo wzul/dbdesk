@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.9
+
+- Alias-aware SQL autocomplete: typing `c.` lists the columns of the table aliased `c`, and columns from every table referenced in `FROM`/`JOIN` are suggested.
+- Fuzzy matching with ranked results across keywords, tables, columns and functions, plus a detail label showing the source table/schema.
+- `⌘Space` / `Ctrl+Space` opens the suggestion list manually; `⌘Space` at the end of a line no longer requires 2 typed characters.
+
 ## 0.8.8
 
 - Export the current table as **CSV**, **JSON** or **SQL INSERTs** from the table right-click menu or the **More** menu; exports respect active filters and sort.
