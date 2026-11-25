@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.8
+
+- Export the current table as **CSV**, **JSON** or **SQL INSERTs** from the table right-click menu or the **More** menu; exports respect active filters and sort.
+- Table right-click menu: **Open**, **Export as CSV/JSON/SQL**, **Copy name** and **Delete table…** (write-enabled SQL connections).
+- **Quick panel** (`⌘P` / `Ctrl+P`): jump to tables, views, schemas, functions or connections, or run actions such as new SQL tab, toggle theme, settings and close connection.
+- SQL editor syntax highlighting for keywords, strings, numbers, comments and function calls.
+- JSON/JSONB cells open a large editor modal with **Format**, **NULL**, Cancel and Save.
+- New `POST /table/export`, `POST /table/drop` and `GET /connections/{id}/functions` endpoints.
+
 ## 0.6.12
 
 - Table tabs are flat underline tabs instead of boxed chips.
