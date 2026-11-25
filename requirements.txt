@@ -1,2 +1,2 @@
-pymongo>=4.9
+pymongo>=4.20.1
 redis>=5.0
