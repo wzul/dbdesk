@@ -6,6 +6,8 @@ and HTTP query gateways (including Cloudflare Zero Trust). Connections, a schema
 runner, CSV import/export, saved views, schema diff/index tools and a full audit
 log, all from the Hermes Desktop/Webapp.
 
+Home page: **dbdesk.app**.
+
 ![DB Desk data grid](docs/img/02-data-grid.png)
 
 ## Beyond TablePlus
