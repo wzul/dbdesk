@@ -1825,6 +1825,13 @@ class TestAiComplete(Base):
             )
         self.assertEqual(result["suggestion"], "country")
 
+    async def test_autocomplete_defaults_to_on(self):
+        path = api._ai_path()
+        if path.exists():
+            path.unlink()
+        status = await api.ai_config()
+        self.assertTrue(status["ai_complete"])
+
     async def test_config_roundtrip_keeps_opt_in(self):
         saved = await api.ai_config_save(
             {"base_url": "https://example.invalid/v1", "model": "m", "ai_complete": True}

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.11
+
+- AI autocomplete now defaults to **on** once an AI provider is configured; turn it off under AI provider settings if you do not want it.
+
 ## 0.8.10
 
 - **Detect models**: enter the base URL and API key, press **Detect models** and pick from the provider's model list instead of typing the name (with **Type** to fall back to a custom model).
