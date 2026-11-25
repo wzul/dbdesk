@@ -1761,5 +1761,78 @@ class TestMcpInspect(Base):
         self.assertEqual(result["tool_count"], 7)
 
 
+
+# --------------------------------------------------------------------------- #
+# AI model discovery + autocomplete
+# --------------------------------------------------------------------------- #
+
+
+class TestAiComplete(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        api._save_ai_config(
+            {
+                "base_url": "https://example.invalid/v1",
+                "model": "test",
+                "api_key_enc": api._encrypt("sk-test"),
+                "ai_complete": True,
+            }
+        )
+
+    async def test_models_lists_and_sorts(self):
+        payload = {"data": [{"id": "b-model"}, {"id": "a-model"}, "c-model"]}
+        with mock.patch.object(api, "_mcp_http_json", return_value=payload) as http:
+            result = await api.ai_models(
+                {"base_url": "https://example.invalid/v1", "api_key": "sk-x"}
+            )
+        self.assertEqual(result["models"], ["a-model", "b-model", "c-model"])
+        self.assertTrue(http.call_args.args[0].endswith("/v1/models"))
+
+    async def test_models_requires_a_key(self):
+        api._save_ai_config(
+            {"base_url": "https://example.invalid/v1", "model": "test", "api_key_enc": ""}
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            await api.ai_models({"base_url": "https://example.invalid/v1", "api_key": ""})
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_complete_requires_opt_in(self):
+        api._save_ai_config(
+            {
+                "base_url": "https://example.invalid/v1",
+                "model": "test",
+                "api_key_enc": api._encrypt("sk-test"),
+                "ai_complete": False,
+            }
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            await api.ai_complete(
+                {"connection_id": "c1", "sql": "select * from t", "caret": 4}
+            )
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_complete_returns_first_line(self):
+        completion = {"choices": [{"message": {"content": "```sql\ncountry\n```"}}]}
+        with mock.patch.object(api, "_connect", lambda cid: self.conn("sqlite")), \
+             mock.patch.object(api, "_ai_complete_context", lambda *a, **k: "Dialect: sqlite"), \
+             mock.patch.object(api, "_ai_post", lambda *a, **k: completion):
+            result = await api.ai_complete(
+                {
+                    "connection_id": "c1",
+                    "sql": "select * from customers where ",
+                    "caret": 27,
+                }
+            )
+        self.assertEqual(result["suggestion"], "country")
+
+    async def test_config_roundtrip_keeps_opt_in(self):
+        saved = await api.ai_config_save(
+            {"base_url": "https://example.invalid/v1", "model": "m", "ai_complete": True}
+        )
+        self.assertTrue(saved["ai_complete"])
+        status = await api.ai_config()
+        self.assertTrue(status["ai_complete"])
+
+
 if __name__ == "__main__":
     unittest.main()

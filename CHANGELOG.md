@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.10
+
+- **Detect models**: enter the base URL and API key, press **Detect models** and pick from the provider's model list instead of typing the name (with **Type** to fall back to a custom model).
+- **AI autocomplete (opt-in)**: enable it in the AI panel settings, then press **⌘I** in the SQL editor. The configured provider returns a continuation at the caret; **Tab** inserts it, **Esc** dismisses it.
+- Sends only the SQL text plus dialect, database name and referenced table/column names and types — never rows, passwords or tokens.
+- New `POST /ai/models` and `POST /ai/complete` endpoints; `ai_complete` is stored with the AI config and rejected server-side when off.
+
 ## 0.8.9
 
 - Alias-aware SQL autocomplete: typing `c.` lists the columns of the table aliased `c`, and columns from every table referenced in `FROM`/`JOIN` are suggested.
