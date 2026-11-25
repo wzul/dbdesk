@@ -1723,5 +1723,43 @@ class TestColumnFeatures(Base):
         self.assertEqual(result["decrypted_columns"], ["card"])
 
 
+
+
+class TestMcpInspect(Base):
+    def _tools(self):
+        def tool(name, description, properties=None):
+            return {
+                "name": name,
+                "description": description,
+                "inputSchema": {"type": "object", "properties": properties or {}},
+            }
+
+        return [
+            tool("orders_query", "Run a read-only SQL query against the orders database.", {"sql": {}}),
+            tool("orders_list_databases", "List Postgres database names visible on the orders server."),
+            tool("blog_query", "Run a read-only SQL query against the blog database.", {"sql": {}}),
+            tool("blog_list_databases", "List MySQL databases the blog endpoint can see."),
+            tool("events_query", "Run a read-only SQL query against the ClickHouse database.", {"query": {}}),
+            tool("events_list_databases", "List ClickHouse databases the events endpoint can see."),
+            tool("list_tables", "List tables in a database.", {"database": {}}),
+        ]
+
+    def test_detects_query_tools(self):
+        with mock.patch.object(api, "_mcp_tools", lambda url: self._tools()):
+            result = api._mcp_inspect("https://mcp.example.com/mcp")
+        names = [item["name"] for item in result["query_tools"]]
+        self.assertIn("orders_query", names)
+        self.assertIn("blog_query", names)
+        self.assertIn("events_query", names)
+        self.assertNotIn("list_tables", names)
+        by_name = {item["name"]: item for item in result["query_tools"]}
+        self.assertEqual(by_name["orders_query"]["sql_arg"], "sql")
+        self.assertEqual(by_name["orders_query"]["dialect"], "postgres")
+        self.assertEqual(by_name["blog_query"]["dialect"], "mysql")
+        self.assertEqual(by_name["events_query"]["dialect"], "clickhouse")
+        self.assertEqual(by_name["events_query"]["sql_arg"], "query")
+        self.assertEqual(result["tool_count"], 7)
+
+
 if __name__ == "__main__":
     unittest.main()
